@@ -138,4 +138,76 @@ mod tests {
         assert!(message.contains("Bid: 1.5 KSM"));
         assert!(message.contains("Approvals: 3, Rejections: 1"));
     }
+
+    #[test]
+    fn renders_multiple_candidates_with_header() {
+        let candidates = vec![
+            Candidate {
+                address_or_handle: "candidate-a".to_owned(),
+                bid_plancks: 1_000_000_000_000,
+                tally: Tally {
+                    approvals: 1,
+                    rejections: 0,
+                },
+            },
+            Candidate {
+                address_or_handle: "candidate-b".to_owned(),
+                bid_plancks: 2_000_000_000_000,
+                tally: Tally {
+                    approvals: 2,
+                    rejections: 1,
+                },
+            },
+        ];
+
+        let message = candidates_message(&candidates);
+        assert!(message.starts_with("The current candidates are:"));
+        assert!(message.contains("* candidate-a"));
+        assert!(message.contains("* candidate-b"));
+    }
+
+    #[test]
+    fn renders_voting_period_with_new_period_text() {
+        let period = CandidatePeriod::from_block(1);
+        let defender = Defender {
+            address_or_handle: Some("@defender:matrix.org".to_owned()),
+            skeptic: Some("@skeptic:matrix.org".to_owned()),
+            tally: Tally {
+                approvals: 10,
+                rejections: 3,
+            },
+        };
+        let message = period_message(
+            &period,
+            &defender,
+            &[],
+            Some("@head:matrix.org"),
+            Some("@candidate-skeptic:matrix.org"),
+            true,
+        );
+
+        assert!(message.contains("A new candidate period has started."));
+        assert!(message.contains("A new challenge period has also started."));
+        assert!(message.contains("The current head is @head:matrix.org."));
+        assert!(!message.contains("Approvals: 10"));
+    }
+
+    #[test]
+    fn renders_claim_period_and_defender_tally() {
+        let period = CandidatePeriod::from_block(CandidatePeriod::VOTE_PERIOD_BLOCKS + 10);
+        let defender = Defender {
+            address_or_handle: None,
+            skeptic: None,
+            tally: Tally {
+                approvals: 8,
+                rejections: 6,
+            },
+        };
+        let message = period_message(&period, &defender, &[], None, None, false);
+
+        assert!(message.contains("We are currently in the claim period."));
+        assert!(message.contains("The current defender is None."));
+        assert!(message.contains("Approvals: 8"));
+        assert!(message.contains("The current skeptic for the candidates is None."));
+    }
 }

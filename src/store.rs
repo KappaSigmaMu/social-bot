@@ -66,3 +66,50 @@ impl OverrideStore {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+
+    fn store() -> OverrideStore {
+        let file = NamedTempFile::new().unwrap();
+        let path = file.into_temp_path().keep().unwrap();
+        OverrideStore::open(path).unwrap()
+    }
+
+    #[test]
+    fn creates_updates_reads_and_deletes_overrides() {
+        let store = store();
+        assert_eq!(store.matrix_handle_for_address("addr").unwrap(), None);
+        assert_eq!(
+            store.address_for_matrix_handle("@user:matrix.org").unwrap(),
+            None
+        );
+
+        store.set_matrix_handle("addr", "@user:matrix.org").unwrap();
+        assert_eq!(
+            store.matrix_handle_for_address("addr").unwrap().as_deref(),
+            Some("@user:matrix.org")
+        );
+        assert_eq!(
+            store
+                .address_for_matrix_handle("@user:matrix.org")
+                .unwrap()
+                .as_deref(),
+            Some("addr")
+        );
+
+        store
+            .set_matrix_handle("addr", "@updated:matrix.org")
+            .unwrap();
+        assert_eq!(
+            store.matrix_handle_for_address("addr").unwrap().as_deref(),
+            Some("@updated:matrix.org")
+        );
+
+        assert!(!store.unset_by_matrix_handle("@missing:matrix.org").unwrap());
+        assert!(store.unset_by_matrix_handle("@updated:matrix.org").unwrap());
+        assert_eq!(store.matrix_handle_for_address("addr").unwrap(), None);
+    }
+}

@@ -80,4 +80,26 @@ mod tests {
         ));
         assert!(!is_valid_address("asdasdasdasd"));
     }
+
+    #[test]
+    fn encodes_and_decodes_account_ids() {
+        let account = [42u8; 32];
+        let kusama = encode_account_id(&account, 2);
+        assert_eq!(decode_account_id(&kusama), Some(account));
+
+        let custom_network = encode_account_id(&account, 1000);
+        assert_eq!(decode_account_id(&custom_network), Some(account));
+    }
+
+    #[test]
+    fn rejects_bad_lengths_and_checksums() {
+        assert_eq!(decode_account_id("111"), None);
+
+        let account = [1u8; 32];
+        let mut encoded = encode_account_id(&account, 2).into_bytes();
+        let last = encoded.len() - 1;
+        encoded[last] = if encoded[last] == b'1' { b'2' } else { b'1' };
+        let corrupted = String::from_utf8(encoded).unwrap();
+        assert_eq!(decode_account_id(&corrupted), None);
+    }
 }

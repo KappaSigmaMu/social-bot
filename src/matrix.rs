@@ -36,18 +36,11 @@ impl MatrixClient {
                 .duration_since(std::time::UNIX_EPOCH)?
                 .as_nanos()
         );
-        let url = self.homeserver.join(&format!(
-            "/_matrix/client/v3/rooms/{}/send/m.room.message/{}",
-            url_escape(room_id),
-            txn_id
-        ))?;
+        let url = self.send_message_url(room_id, &txn_id)?;
         self.http
             .put(url)
             .bearer_auth(&self.token)
-            .json(&json!({
-                "msgtype": "m.text",
-                "body": body,
-            }))
+            .json(&message_payload(body))
             .send()
             .await?
             .error_for_status()
@@ -56,14 +49,7 @@ impl MatrixClient {
     }
 
     async fn sync(&self, since: Option<&str>) -> Result<SyncResponse> {
-        let mut url = self.homeserver.join("/_matrix/client/v3/sync")?;
-        {
-            let mut query = url.query_pairs_mut();
-            query.append_pair("timeout", "30000");
-            if let Some(since) = since {
-                query.append_pair("since", since);
-            }
-        }
+        let url = self.sync_url(since)?;
         Ok(self
             .http
             .get(url)
@@ -74,6 +60,26 @@ impl MatrixClient {
             .context("Matrix sync failed")?
             .json()
             .await?)
+    }
+
+    fn send_message_url(&self, room_id: &str, txn_id: &str) -> Result<Url> {
+        Ok(self.homeserver.join(&format!(
+            "/_matrix/client/v3/rooms/{}/send/m.room.message/{}",
+            url_escape(room_id),
+            txn_id
+        ))?)
+    }
+
+    fn sync_url(&self, since: Option<&str>) -> Result<Url> {
+        let mut url = self.homeserver.join("/_matrix/client/v3/sync")?;
+        {
+            let mut query = url.query_pairs_mut();
+            query.append_pair("timeout", "30000");
+            if let Some(since) = since {
+                query.append_pair("since", since);
+            }
+        }
+        Ok(url)
     }
 
     pub async fn run<C>(&self, room_id: &str, prefix: &str, society: Arc<Society<C>>) -> Result<()>
@@ -189,6 +195,13 @@ fn url_escape(value: &str) -> String {
         .collect()
 }
 
+fn message_payload(body: &str) -> serde_json::Value {
+    json!({
+        "msgtype": "m.text",
+        "body": body,
+    })
+}
+
 #[derive(Debug, Deserialize)]
 struct SyncResponse {
     next_batch: String,
@@ -225,4 +238,119 @@ struct RoomEvent {
 #[derive(Debug, Default, Deserialize)]
 struct MessageContent {
     body: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::chain::Society;
+    use crate::chain::tests::FakeChain;
+    use crate::models::{Candidate, Tally};
+    use crate::store::OverrideStore;
+    use tempfile::NamedTempFile;
+
+    fn test_society(chain: FakeChain) -> Society<FakeChain> {
+        let file = NamedTempFile::new().unwrap();
+        let path = file.into_temp_path().keep().unwrap();
+        Society::new(chain, OverrideStore::open(path).unwrap())
+    }
+
+    #[test]
+    fn escapes_matrix_path_segments() {
+        assert_eq!(url_escape("abcXYZ-_.~"), "abcXYZ-_.~");
+        assert_eq!(url_escape("!room:e2e.local"), "%21room%3Ae2e.local");
+        assert_eq!(url_escape("space here"), "space%20here");
+    }
+
+    #[test]
+    fn deserializes_sync_response_with_defaults() {
+        let response: SyncResponse = serde_json::from_value(serde_json::json!({
+            "next_batch": "s1",
+            "rooms": {
+                "join": {
+                    "!room:e2e.local": {
+                        "timeline": {
+                            "events": [
+                                {
+                                    "sender": "@user:e2e.local",
+                                    "origin_server_ts": 123,
+                                    "content": {"body": "!ping"}
+                                },
+                                {
+                                    "sender": "@empty:e2e.local",
+                                    "content": {}
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        }))
+        .unwrap();
+
+        let room = response.rooms.join.get("!room:e2e.local").unwrap();
+        assert_eq!(response.next_batch, "s1");
+        assert_eq!(room.timeline.events.len(), 2);
+        assert_eq!(
+            room.timeline.events[0].content.body.as_deref(),
+            Some("!ping")
+        );
+        assert_eq!(room.timeline.events[1].origin_server_ts, None);
+    }
+
+    #[tokio::test]
+    async fn builds_period_snapshot_message() {
+        let mut chain = FakeChain {
+            block_number: 1,
+            head: Some("@head:matrix.org".to_owned()),
+            defender: Some("@defender:matrix.org".to_owned()),
+            defender_skeptic: Some("@defender-skeptic:matrix.org".to_owned()),
+            candidate_skeptic: Some("@candidate-skeptic:matrix.org".to_owned()),
+            ..Default::default()
+        };
+        chain.candidates.push(Candidate {
+            address_or_handle: "@candidate:matrix.org".to_owned(),
+            bid_plancks: 1_000_000_000_000,
+            tally: Tally {
+                approvals: 1,
+                rejections: 0,
+            },
+        });
+        let society = test_society(chain);
+
+        let (kind, message) = period_snapshot(&society).await.unwrap();
+        assert_eq!(kind, CandidatePeriodKind::Voting);
+        assert!(message.contains("A new candidate period has started."));
+        assert!(message.contains("@candidate:matrix.org"));
+    }
+
+    #[test]
+    fn builds_matrix_urls_and_payloads() {
+        let client = MatrixClient::new(
+            "https://matrix.example",
+            "token".to_owned(),
+            "@bot:e2e.local".to_owned(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            client
+                .send_message_url("!room:e2e.local", "txn-1")
+                .unwrap()
+                .as_str(),
+            "https://matrix.example/_matrix/client/v3/rooms/%21room%3Ae2e.local/send/m.room.message/txn-1"
+        );
+        assert_eq!(
+            client.sync_url(None).unwrap().as_str(),
+            "https://matrix.example/_matrix/client/v3/sync?timeout=30000"
+        );
+        assert_eq!(
+            client.sync_url(Some("s0")).unwrap().as_str(),
+            "https://matrix.example/_matrix/client/v3/sync?timeout=30000&since=s0"
+        );
+        assert_eq!(
+            message_payload("hello"),
+            serde_json::json!({"msgtype": "m.text", "body": "hello"})
+        );
+    }
 }

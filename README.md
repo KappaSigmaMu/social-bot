@@ -50,9 +50,23 @@ cargo check
 cargo test
 ```
 
+## Coverage
+
+Rust does not have a standard-library coverage reporter. Use `cargo-llvm-cov`, which wraps Rust/LLVM source-based coverage:
+
+```sh
+cargo install cargo-llvm-cov
+./scripts/coverage.sh
+```
+
+Reports are written to:
+
+- `target/coverage/html/index.html`
+- `target/coverage/lcov.info`
+
 ## Docker E2E
 
-The Docker e2e harness starts Chopsticks, a mock Matrix homeserver, the bot, and an assertion runner:
+The Docker e2e harness starts Chopsticks, a mock Matrix homeserver, the bot, and an assertion runner. It exercises Matrix command handling, live Kusama state reads through Chopsticks, and SQLite address overrides:
 
 ```sh
 docker compose -f tests/e2e/docker-compose.yml up --build --abort-on-container-exit --exit-code-from e2e

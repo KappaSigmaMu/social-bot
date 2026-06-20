@@ -156,6 +156,8 @@ mod tests {
     use tempfile::NamedTempFile;
 
     const MEMBER: &str = "FUfBKr2pDxKrxmExGp4hjU6St4BDgffzKcyAqv6pruGnez1";
+    const CANDIDATE: &str = "G75yJUM2TveDikvysHHW5XhkP35gXqDAsgRLYQTh3gVDir9";
+    const DEFENDER: &str = "DGE8ATd2NaitqX4jdvZNXFNMmY9Qui6swnfoheCiz7efWGG";
 
     fn test_society(chain: FakeChain) -> Society<FakeChain> {
         let file = NamedTempFile::new().unwrap();
@@ -213,5 +215,202 @@ mod tests {
         .unwrap();
         assert!(response.contains("Approvals: 7"));
         assert!(response.contains("Bid: 2 KSM"));
+    }
+
+    #[tokio::test]
+    async fn ignores_non_commands_empty_commands_and_unknown_commands() {
+        let society = test_society(FakeChain::default());
+
+        assert!(
+            handle_command(&society, "!", "@testuser:matrix.org", "hello", None)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            handle_command(&society, "!", "@testuser:matrix.org", "!", None)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            handle_command(&society, "!", "@testuser:matrix.org", "!unknown", None)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn handles_usage_and_failure_branches() {
+        let society = test_society(FakeChain::default());
+
+        assert_eq!(
+            handle_command(&society, "!", "@testuser:matrix.org", "!info", None)
+                .await
+                .unwrap()
+                .unwrap(),
+            "Usage: `!info <address>`"
+        );
+        assert_eq!(
+            handle_command(&society, "!", "@testuser:matrix.org", "!set_address", None)
+                .await
+                .unwrap()
+                .unwrap(),
+            "Usage: `!set_address <address>`"
+        );
+        assert!(
+            handle_command(
+                &society,
+                "!",
+                "@testuser:matrix.org",
+                "!set_address not-an-address",
+                None,
+            )
+            .await
+            .unwrap()
+            .unwrap()
+            .contains("Failed to set matrix handle")
+        );
+        assert!(
+            handle_command(
+                &society,
+                "!",
+                "@testuser:matrix.org",
+                "!unset_address",
+                None
+            )
+            .await
+            .unwrap()
+            .unwrap()
+            .contains("Failed to unset address")
+        );
+        assert!(
+            handle_command(&society, "!", "@testuser:matrix.org", "!me", None)
+                .await
+                .unwrap()
+                .unwrap()
+                .contains("You have not set your address yet")
+        );
+    }
+
+    #[tokio::test]
+    async fn handles_chain_backed_read_commands() {
+        let mut chain = FakeChain::default();
+        chain.members.insert(MEMBER.to_owned());
+        chain.candidates.push(Candidate {
+            address_or_handle: CANDIDATE.to_owned(),
+            bid_plancks: 3_250_000_000_000,
+            tally: Tally {
+                approvals: 9,
+                rejections: 4,
+            },
+        });
+        chain.defender = Some(DEFENDER.to_owned());
+        chain.defender_skeptic = Some(MEMBER.to_owned());
+        chain.candidate_skeptic = Some(CANDIDATE.to_owned());
+        chain.head = Some(MEMBER.to_owned());
+        chain.founder = Some(MEMBER.to_owned());
+        chain.block_number = 1;
+        chain.strikes.insert(MEMBER.to_owned(), 5);
+        chain
+            .identities
+            .insert(MEMBER.to_owned(), "@member:matrix.org".to_owned());
+        let society = test_society(chain);
+
+        let ping = handle_command(&society, "!", "@testuser:matrix.org", "!ping", Some(0))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(ping.starts_with("Pong! Took "));
+
+        assert!(
+            handle_command(&society, "!", "@testuser:matrix.org", "!defender", None)
+                .await
+                .unwrap()
+                .unwrap()
+                .contains("So far they have 1 approvals and 2 rejections")
+        );
+        assert_eq!(
+            handle_command(&society, "!", "@testuser:matrix.org", "!head", None)
+                .await
+                .unwrap()
+                .unwrap(),
+            format!("The current head is `{MEMBER}`")
+        );
+        assert!(
+            handle_command(
+                &society,
+                "!",
+                "@testuser:matrix.org",
+                &format!("!info {MEMBER}"),
+                None,
+            )
+            .await
+            .unwrap()
+            .unwrap()
+            .contains("* **Strikes**: 5")
+        );
+        assert!(
+            handle_command(&society, "!", "@testuser:matrix.org", "!period", None)
+                .await
+                .unwrap()
+                .unwrap()
+                .contains("We are currently in the voting period")
+        );
+        assert!(
+            handle_command(&society, "!", "@testuser:matrix.org", "!skeptics", None)
+                .await
+                .unwrap()
+                .unwrap()
+                .contains("The current skeptic for the defender")
+        );
+        assert!(
+            handle_command(&society, "!", "@testuser:matrix.org", "!skeptic", None)
+                .await
+                .unwrap()
+                .unwrap()
+                .contains("The current skeptic for the candidates")
+        );
+    }
+
+    #[tokio::test]
+    async fn handles_absent_chain_values() {
+        let society = test_society(FakeChain::default());
+
+        assert_eq!(
+            handle_command(&society, "!", "@testuser:matrix.org", "!defender", None)
+                .await
+                .unwrap()
+                .unwrap(),
+            "There is no defender"
+        );
+        assert!(
+            handle_command(&society, "!", "@testuser:matrix.org", "!head", None)
+                .await
+                .unwrap()
+                .unwrap()
+                .contains("There is no head")
+        );
+        assert!(
+            handle_command(&society, "!", "@testuser:matrix.org", "!skeptics", None)
+                .await
+                .unwrap()
+                .unwrap()
+                .contains("There is no skeptic for the current defender")
+        );
+        assert!(
+            handle_command(
+                &society,
+                "!",
+                "@testuser:matrix.org",
+                &format!("!candidates {CANDIDATE}"),
+                None,
+            )
+            .await
+            .unwrap()
+            .unwrap()
+            .contains("No candidate with address")
+        );
     }
 }

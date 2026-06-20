@@ -4,7 +4,7 @@ This harness runs the bot against:
 
 - a Chopsticks Kusama fork at `ws://chopsticks:8000`
 - a tiny mock Matrix homeserver
-- a Python assertion runner that sends `!head` and waits for the bot response
+- a Python assertion runner that exercises `!ping`, `!head`, `!period`, `!defender`, `!skeptics`, `!candidates`, `!set_address`, `!me`, and `!unset_address`
 
 Run it from the repository root:
 

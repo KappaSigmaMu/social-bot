@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use serde_json::Value as JsonValue;
 use std::sync::{Arc, Mutex};
 use subxt::dynamic::{Value, storage};
+use subxt::error::{Error as SubxtError, StorageError};
 use subxt::{OnlineClient, PolkadotConfig};
 
 const KUSAMA_SS58_PREFIX: u16 = 2;
@@ -349,11 +350,46 @@ impl ChainData for SubxtKusama {
     }
 
     async fn identity_matrix_handle(&self, address: &str) -> Result<Option<String>> {
-        let Some(value) = self.fetch_keyed("Identity", "IdentityOf", address).await? else {
+        let value = match self.fetch_keyed("Identity", "IdentityOf", address).await {
+            Ok(value) => value,
+            Err(error) if is_missing_storage_metadata(&error, "Identity", "IdentityOf") => {
+                return Ok(None);
+            }
+            Err(error) => return Err(error),
+        };
+        let Some(value) = value else {
             return Ok(None);
         };
         let json = value_to_json(value)?;
         Ok(find_riot_raw(&json))
+    }
+}
+
+fn is_missing_storage_metadata(error: &anyhow::Error, pallet: &str, entry: &str) -> bool {
+    if let Some(error) = error.downcast_ref::<StorageError>() {
+        return storage_error_is_missing_metadata(error, pallet, entry);
+    }
+
+    matches!(
+        error.downcast_ref::<SubxtError>(),
+        Some(SubxtError::StorageError(error))
+            if storage_error_is_missing_metadata(error, pallet, entry)
+    )
+}
+
+fn storage_error_is_missing_metadata(error: &StorageError, pallet: &str, entry: &str) -> bool {
+    match error {
+        StorageError::PalletNameNotFound(name) => name == pallet,
+        StorageError::StorageEntryNotFound {
+            pallet_name,
+            entry_name,
+        } => pallet_name == pallet && entry_name == entry,
+        StorageError::StorageInfoError(error) => {
+            let message = error.to_string();
+            message == format!("Pallet not found: {pallet}")
+                || message == format!("Storage item not found: {entry} in pallet {pallet}")
+        }
+        _ => false,
     }
 }
 
@@ -456,6 +492,7 @@ fn find_raw_string(value: &JsonValue) -> Option<String> {
 #[cfg(test)]
 pub mod tests {
     use super::*;
+    use crate::models::CandidatePeriodKind;
     use std::collections::{HashMap, HashSet};
 
     #[derive(Default)]
@@ -464,6 +501,8 @@ pub mod tests {
         pub suspended: HashSet<String>,
         pub candidates: Vec<Candidate>,
         pub defender: Option<String>,
+        pub defender_skeptic: Option<String>,
+        pub strikes: HashMap<String, u64>,
         pub founder: Option<String>,
         pub head: Option<String>,
         pub candidate_skeptic: Option<String>,
@@ -485,14 +524,14 @@ pub mod tests {
             Ok(self.candidates.clone())
         }
 
-        async fn strikes(&self, _address: &str) -> Result<u64> {
-            Ok(0)
+        async fn strikes(&self, address: &str) -> Result<u64> {
+            Ok(*self.strikes.get(address).unwrap_or(&0))
         }
 
         async fn defending_raw(&self) -> Result<Defender> {
             Ok(Defender {
                 address_or_handle: self.defender.clone(),
-                skeptic: None,
+                skeptic: self.defender_skeptic.clone(),
                 tally: Tally {
                     approvals: 1,
                     rejections: 2,
@@ -519,5 +558,184 @@ pub mod tests {
         async fn identity_matrix_handle(&self, address: &str) -> Result<Option<String>> {
             Ok(self.identities.get(address).cloned())
         }
+    }
+
+    const MEMBER: &str = "FUfBKr2pDxKrxmExGp4hjU6St4BDgffzKcyAqv6pruGnez1";
+    const CANDIDATE: &str = "G75yJUM2TveDikvysHHW5XhkP35gXqDAsgRLYQTh3gVDir9";
+    const SUSPENDED: &str = "J9c2fcmRhhNaJAxA8yLMkxap7PEWuYc1UaaTqxunfKscjG3";
+    const DEFENDER: &str = "DGE8ATd2NaitqX4jdvZNXFNMmY9Qui6swnfoheCiz7efWGG";
+
+    fn test_store() -> OverrideStore {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let path = file.into_temp_path().keep().unwrap();
+        OverrideStore::open(path).unwrap()
+    }
+
+    #[tokio::test]
+    async fn society_resolves_member_states_and_info() {
+        let mut chain = FakeChain::default();
+        chain.members.insert(MEMBER.to_owned());
+        chain.suspended.insert(SUSPENDED.to_owned());
+        chain.candidates.push(Candidate {
+            address_or_handle: CANDIDATE.to_owned(),
+            bid_plancks: 1,
+            tally: Tally {
+                approvals: 1,
+                rejections: 0,
+            },
+        });
+        chain.founder = Some(MEMBER.to_owned());
+        chain.defender = Some(DEFENDER.to_owned());
+        chain.strikes.insert(MEMBER.to_owned(), 2);
+        chain
+            .identities
+            .insert(MEMBER.to_owned(), "@member:matrix.org".to_owned());
+
+        let society = Society::new(chain, test_store());
+
+        assert_eq!(
+            society.get_member_state(MEMBER).await.unwrap(),
+            MemberState::Member
+        );
+        assert_eq!(
+            society.get_member_state(SUSPENDED).await.unwrap(),
+            MemberState::SuspendedMember
+        );
+        assert_eq!(
+            society.get_member_state(CANDIDATE).await.unwrap(),
+            MemberState::Candidate
+        );
+        assert_eq!(
+            society.get_member_state("unknown").await.unwrap(),
+            MemberState::NonMember
+        );
+
+        let info = society.get_member_info(MEMBER).await.unwrap();
+        assert_eq!(info.element_handle.as_deref(), Some("@member:matrix.org"));
+        assert_eq!(info.strikes, 2);
+        assert!(info.is_founder);
+        assert!(!info.is_defender);
+    }
+
+    #[tokio::test]
+    async fn society_prefers_db_overrides_for_handles() {
+        let mut chain = FakeChain::default();
+        chain
+            .identities
+            .insert(MEMBER.to_owned(), "@onchain:matrix.org".to_owned());
+        chain.candidate_skeptic = Some(MEMBER.to_owned());
+        chain.defender = Some(MEMBER.to_owned());
+        chain.defender_skeptic = Some(MEMBER.to_owned());
+        let society = Society::new(chain, test_store());
+
+        assert!(
+            society
+                .set_matrix_handle(MEMBER, "@override:matrix.org")
+                .unwrap()
+        );
+        assert!(
+            !society
+                .set_matrix_handle("bad", "@override:matrix.org")
+                .unwrap()
+        );
+        assert!(!society.set_matrix_handle(MEMBER, "bad").unwrap());
+
+        assert_eq!(
+            society.get_matrix_handle(MEMBER).await.unwrap().as_deref(),
+            Some("@override:matrix.org")
+        );
+        assert_eq!(
+            society.get_candidate_skeptic().await.unwrap().as_deref(),
+            Some("@override:matrix.org")
+        );
+        assert_eq!(
+            society
+                .get_defending()
+                .await
+                .unwrap()
+                .address_or_handle
+                .as_deref(),
+            Some("@override:matrix.org")
+        );
+        assert_eq!(
+            society.get_defending().await.unwrap().skeptic.as_deref(),
+            Some("@override:matrix.org")
+        );
+    }
+
+    #[tokio::test]
+    async fn society_calculates_candidate_period_from_chain_block() {
+        let mut chain = FakeChain {
+            block_number: 72_001,
+            ..Default::default()
+        };
+        let society = Society::new(chain, test_store());
+        let period = society.get_candidate_period().await.unwrap();
+        assert_eq!(period.kind, CandidatePeriodKind::Claim);
+        assert_eq!(period.voting_blocks_left, 0);
+
+        chain = FakeChain {
+            block_number: 100_799,
+            ..Default::default()
+        };
+        let society = Society::new(chain, test_store());
+        assert_eq!(
+            society
+                .get_candidate_period()
+                .await
+                .unwrap()
+                .claim_blocks_left,
+            1
+        );
+    }
+
+    #[test]
+    fn json_helpers_find_nested_values() {
+        let account = [7u8; 32];
+        let json = serde_json::json!({
+            "outer": [
+                {"bid": "1234567890123"},
+                {"tally": {"approvals": 4, "rejections": "2"}},
+                {"who": account},
+                {"identity": {"info": {"riot": {"Raw": "@riot:matrix.org"}}}}
+            ]
+        });
+
+        assert_eq!(find_u128_by_key(&json, "bid"), Some(1_234_567_890_123));
+        assert_eq!(find_u64_by_key(&json, "approvals"), Some(4));
+        assert_eq!(find_u64_by_key(&json, "rejections"), Some(2));
+        assert_eq!(find_account_ids(&json), vec![account]);
+        assert_eq!(find_riot_raw(&json).as_deref(), Some("@riot:matrix.org"));
+        assert_eq!(find_u128_by_key(&json, "missing"), None);
+    }
+
+    #[test]
+    fn account_from_key_uses_last_32_bytes() {
+        let mut key = vec![1, 2, 3];
+        key.extend([9u8; 32]);
+        assert_eq!(account_from_key(&key), Some([9u8; 32]));
+        assert_eq!(account_from_key(&[1, 2, 3]), None);
+    }
+
+    #[test]
+    fn classifies_missing_optional_storage_metadata() {
+        assert!(storage_error_is_missing_metadata(
+            &StorageError::PalletNameNotFound("Identity".to_owned()),
+            "Identity",
+            "IdentityOf"
+        ));
+        assert!(storage_error_is_missing_metadata(
+            &StorageError::StorageEntryNotFound {
+                pallet_name: "Identity".to_owned(),
+                entry_name: "IdentityOf".to_owned(),
+            },
+            "Identity",
+            "IdentityOf"
+        ));
+        assert!(!storage_error_is_missing_metadata(
+            &StorageError::PalletNameNotFound("System".to_owned()),
+            "Identity",
+            "IdentityOf"
+        ));
     }
 }

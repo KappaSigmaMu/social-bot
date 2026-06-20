@@ -51,7 +51,7 @@ services:
       RPC_URL: ws://chopsticks:8000
       DB_PATH: /tmp/society_overrides.db
       PREFIX: "!"
-      RUST_LOG: info
+      RUST_LOG: warn
     depends_on:
       chopsticks:
         condition: service_healthy
