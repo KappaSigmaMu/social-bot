@@ -1,0 +1,71 @@
+services:
+  chopsticks:
+    image: node:22-bookworm-slim
+    command:
+      - sh
+      - -c
+      - >
+        npx @acala-network/chopsticks@1.4.2
+        --endpoint=wss://kusama-rpc.polkadot.io/
+        --host=0.0.0.0
+        --port=8000
+        --build-block-mode=Instant
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "const net=require('net'); const s=net.connect(8000,'127.0.0.1'); s.on('connect',()=>{s.destroy();process.exit(0)}); s.on('error',()=>process.exit(1)); setTimeout(()=>process.exit(1),1000)"
+      interval: 5s
+      timeout: 2s
+      retries: 60
+
+  matrix:
+    image: python:3.13-slim
+    working_dir: /e2e
+    command: ["python", "matrix_mock.py"]
+    volumes:
+      - .:/e2e:ro
+    ports:
+      - "18008:8008"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8008/_test/health', timeout=1)"
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  bot:
+    build:
+      context: ../..
+    environment:
+      MATRIX_ROOM: "!society:e2e.local"
+      MATRIX_TOKEN: e2e-token
+      MATRIX_HOMESERVER: http://matrix:8008
+      MATRIX_USER_ID: "@societybot:e2e.local"
+      RPC_URL: ws://chopsticks:8000
+      DB_PATH: /tmp/society_overrides.db
+      PREFIX: "!"
+      RUST_LOG: info
+    depends_on:
+      chopsticks:
+        condition: service_healthy
+      matrix:
+        condition: service_healthy
+
+  e2e:
+    image: python:3.13-slim
+    working_dir: /e2e
+    command: ["python", "run_e2e.py"]
+    volumes:
+      - .:/e2e:ro
+    environment:
+      MATRIX_TEST_URL: http://matrix:8008
+    depends_on:
+      bot:
+        condition: service_started

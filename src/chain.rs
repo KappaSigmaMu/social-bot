@@ -190,11 +190,14 @@ pub struct SubxtKusama {
 
 impl SubxtKusama {
     pub async fn connect(url: &str) -> Result<Self> {
-        Ok(Self {
-            api: OnlineClient::<PolkadotConfig>::from_url(url)
-                .await
-                .with_context(|| format!("connecting to Kusama RPC {url}"))?,
-        })
+        let api = if url.starts_with("ws://") || url.starts_with("http://") {
+            OnlineClient::<PolkadotConfig>::from_insecure_url(url).await
+        } else {
+            OnlineClient::<PolkadotConfig>::from_url(url).await
+        }
+        .with_context(|| format!("connecting to Kusama RPC {url}"))?;
+
+        Ok(Self { api })
     }
 
     async fn fetch(&self, pallet: &str, entry: &str) -> Result<Option<Value>> {

@@ -49,3 +49,11 @@ cargo fmt --check
 cargo check
 cargo test
 ```
+
+## Docker E2E
+
+The Docker e2e harness starts Chopsticks, a mock Matrix homeserver, the bot, and an assertion runner:
+
+```sh
+docker compose -f tests/e2e/docker-compose.yml up --build --abort-on-container-exit --exit-code-from e2e
+```
