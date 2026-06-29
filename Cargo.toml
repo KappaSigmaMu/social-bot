@@ -2,6 +2,7 @@
 name = "element-bot"
 version = "0.1.0"
 edition = "2024"
+default-run = "element-bot"
 
 [dependencies]
 anyhow = "1"
@@ -17,6 +18,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 subxt = { version = "0.50", features = ["jsonrpsee"] }
+subxt-signer = "0.50"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

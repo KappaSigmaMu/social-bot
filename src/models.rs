@@ -87,6 +87,25 @@ pub struct Candidate {
     pub tally: Tally,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Bid {
+    pub address_or_handle: String,
+    pub bid_plancks: u128,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SocietyEvent {
+    Bid {
+        block_number: u64,
+        address: String,
+        bid_plancks: u128,
+    },
+    Unbid {
+        block_number: u64,
+        address: String,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Defender {
     pub address_or_handle: Option<String>,

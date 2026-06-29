@@ -1,0 +1,132 @@
+endpoint:
+#  - wss://kusama-asset-hub-rpc.polkadot.io
+  - wss://asset-hub-kusama-rpc.n.dwellir.com
+#  - wss://asset-hub-kusama.dotters.network
+#  - wss://sys.ibp.network/asset-hub-kusama
+mock-signature-host: true
+block: ${env.KUSAMA_BLOCK_NUMBER}
+db: ./db.sqlite
+# wasm-override: ./custom-kusama-runtime.wasm
+runtime-log-level: 5
+
+import-storage:
+  System:
+    Account:
+      -
+        -
+          - 5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY
+        - providers: 1
+          data:
+            free: '10000000000000'
+      -
+        -
+          - 5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty
+        - providers: 1
+          data:
+            free: '10000000000000'
+      -
+        -
+          - 5FLSigC9HGRKVhB9FiEo4Y3koPsNmBmLJbpXg2mp1hXcS59Y
+        - providers: 1
+          data:
+            free: '10000000000000'
+      -
+        -
+          - 5DAAnrj7VHTznn2AWBemMuyBwZWs6FNFjdyVXUeYum3PTXFy
+        - providers: 1
+          data:
+            free: '10000000000000'
+      -
+        -
+          - 5HGjWAeFDfFCWPsjFQdVV2Msvz2XtMktvgocEZcCj68kUMaw
+        - providers: 1
+          data:
+            free: '10000000000000'
+      -
+        -
+          - 5CiPPseXPECbkjWCa6MnjNokrgYjMqmKndv2rSnekmSK2DjL
+        - providers: 1
+          data:
+            free: '10000000000000'
+      -
+        -
+          - EW8uSDBpxcfHvAyqtHUvrzQX1U9rhjXELjbHnxkjipMEvkx
+        - providers: 1
+          data:
+            free: '50000000000000'
+      -
+        -
+          - JF7gvyH38FjNsj4sE8TFiaZP5hvPnWUTVKsRTNXae5xYU5R
+        - providers: 1
+          data:
+            free: '20000000000000'
+  Indices:
+    Accounts:
+      -
+        -
+          - 0
+        -
+          - 5HGjWAeFDfFCWPsjFQdVV2Msvz2XtMktvgocEZcCj68kUMaw
+          - 0
+          - true
+  Society:
+    $removePrefix:
+      - Bids
+      - Candidates
+      - Members
+      - Payouts
+    Bids:
+      - who: 5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY # Alice
+        kind:
+          Deposit: 1
+        value: 299000000000000
+    Candidates:
+      -
+        -
+          - 5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty # Bob
+        - round: 5
+          kind:
+            Deposit: 33333333000
+          bid: 500000000000000
+          tally:
+            approvals: 1
+            rejections: 0
+          skepticStruck: false
+      -
+        -
+          - 5FLSigC9HGRKVhB9FiEo4Y3koPsNmBmLJbpXg2mp1hXcS59Y # Charlie
+        - round: 5
+          kind:
+            Deposit: 1666666666660
+          bid: 65000000000000
+          tally:
+            approvals: 0
+            rejections: 1
+          skepticStruck: false
+    Members:
+      -
+        -
+          - 5HGjWAeFDfFCWPsjFQdVV2Msvz2XtMktvgocEZcCj68kUMaw # Eve
+        - rank: 0
+          strikes: 5
+          index: 0
+      -
+        -
+          - 5CiPPseXPECbkjWCa6MnjNokrgYjMqmKndv2rSnekmSK2DjL # Ferdie
+        - rank: 1
+          strikes: 0
+          index: 1
+    ChallengeRoundCount: 6
+    RoundCount: 6
+    MemberCount: 2
+    Head: 5HGjWAeFDfFCWPsjFQdVV2Msvz2XtMktvgocEZcCj68kUMaw # Eve
+    Pot: '50000000000000'
+    Payouts:
+      -
+        -
+          - 5HGjWAeFDfFCWPsjFQdVV2Msvz2XtMktvgocEZcCj68kUMaw # Eve
+        - paid: 0
+          payouts:
+            -
+              - 20000000
+              - 15000000000000

@@ -1,7 +1,7 @@
-use crate::chain::{ChainData, Society};
+use crate::chain::{ChainData, Society, SubxtKusama};
 use crate::commands::handle_command;
-use crate::messages::period_message;
-use crate::models::CandidatePeriodKind;
+use crate::messages::{new_bid_message, period_message, unbid_message};
+use crate::models::{Bid, CandidatePeriodKind, SocietyEvent};
 use anyhow::{Context, Result};
 use reqwest::{Client, Url};
 use serde::Deserialize;
@@ -17,6 +17,12 @@ pub struct MatrixClient {
     homeserver: Url,
     token: String,
     user_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RoomTarget {
+    RoomId(String),
+    RoomAlias(String),
 }
 
 impl MatrixClient {
@@ -62,6 +68,13 @@ impl MatrixClient {
             .await?)
     }
 
+    pub async fn resolve_room_id(&self, room: &str) -> Result<String> {
+        match parse_room_target(room)? {
+            RoomTarget::RoomId(room_id) => Ok(room_id),
+            RoomTarget::RoomAlias(alias) => self.lookup_room_alias(&alias).await,
+        }
+    }
+
     fn send_message_url(&self, room_id: &str, txn_id: &str) -> Result<Url> {
         Ok(self.homeserver.join(&format!(
             "/_matrix/client/v3/rooms/{}/send/m.room.message/{}",
@@ -80,6 +93,29 @@ impl MatrixClient {
             }
         }
         Ok(url)
+    }
+
+    fn room_alias_url(&self, alias: &str) -> Result<Url> {
+        Ok(self.homeserver.join(&format!(
+            "/_matrix/client/v3/directory/room/{}",
+            url_escape(alias)
+        ))?)
+    }
+
+    async fn lookup_room_alias(&self, alias: &str) -> Result<String> {
+        let url = self.room_alias_url(alias)?;
+        let response: RoomAliasResponse = self
+            .http
+            .get(url)
+            .bearer_auth(&self.token)
+            .send()
+            .await?
+            .error_for_status()
+            .with_context(|| format!("resolving Matrix room alias {alias}"))?
+            .json()
+            .await
+            .with_context(|| format!("decoding Matrix room alias response for {alias}"))?;
+        Ok(response.room_id)
     }
 
     pub async fn run<C>(&self, room_id: &str, prefix: &str, society: Arc<Society<C>>) -> Result<()>
@@ -161,6 +197,60 @@ impl MatrixClient {
             sleep(Duration::from_secs(60)).await;
         }
     }
+
+    pub async fn announce_society_events(
+        &self,
+        room_id: String,
+        society: Arc<Society<SubxtKusama>>,
+        chain: SubxtKusama,
+    ) -> Result<()> {
+        loop {
+            match chain.stream_society_events().await {
+                Ok(events) => {
+                    for event in events {
+                        match event {
+                            SocietyEvent::Bid {
+                                block_number,
+                                address,
+                                bid_plancks,
+                            } => {
+                                let address_or_handle = society
+                                    .get_matrix_handle(&address)
+                                    .await?
+                                    .unwrap_or(address);
+                                self.send_message(
+                                    &room_id,
+                                    &new_bid_message(
+                                        block_number,
+                                        &Bid {
+                                            address_or_handle,
+                                            bid_plancks,
+                                        },
+                                    ),
+                                )
+                                .await?;
+                            }
+                            SocietyEvent::Unbid {
+                                block_number,
+                                address,
+                            } => {
+                                let address_or_handle = society
+                                    .get_matrix_handle(&address)
+                                    .await?
+                                    .unwrap_or(address);
+                                self.send_message(
+                                    &room_id,
+                                    &unbid_message(block_number, &address_or_handle),
+                                )
+                                .await?;
+                            }
+                        }
+                    }
+                }
+                Err(err) => error!(?err, "failed to stream society events"),
+            }
+        }
+    }
 }
 
 async fn period_snapshot<C>(society: &Society<C>) -> Result<(CandidatePeriodKind, String)>
@@ -195,6 +285,16 @@ fn url_escape(value: &str) -> String {
         .collect()
 }
 
+fn parse_room_target(value: &str) -> Result<RoomTarget> {
+    if value.starts_with('!') {
+        return Ok(RoomTarget::RoomId(value.to_owned()));
+    }
+    if value.starts_with('#') {
+        return Ok(RoomTarget::RoomAlias(value.to_owned()));
+    }
+    anyhow::bail!("MATRIX_ROOM must start with '!' for a room ID or '#' for a room alias");
+}
+
 fn message_payload(body: &str) -> serde_json::Value {
     json!({
         "msgtype": "m.text",
@@ -207,6 +307,11 @@ struct SyncResponse {
     next_batch: String,
     #[serde(default)]
     rooms: Rooms,
+}
+
+#[derive(Debug, Deserialize)]
+struct RoomAliasResponse {
+    room_id: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -260,6 +365,55 @@ mod tests {
         assert_eq!(url_escape("abcXYZ-_.~"), "abcXYZ-_.~");
         assert_eq!(url_escape("!room:e2e.local"), "%21room%3Ae2e.local");
         assert_eq!(url_escape("space here"), "space%20here");
+    }
+
+    #[test]
+    fn parses_room_ids_and_aliases() {
+        assert_eq!(
+            parse_room_target("!room:e2e.local").unwrap(),
+            RoomTarget::RoomId("!room:e2e.local".to_owned())
+        );
+        assert_eq!(
+            parse_room_target("#room:e2e.local").unwrap(),
+            RoomTarget::RoomAlias("#room:e2e.local".to_owned())
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_room_target() {
+        assert!(
+            parse_room_target("room:e2e.local")
+                .unwrap_err()
+                .to_string()
+                .contains("MATRIX_ROOM")
+        );
+    }
+
+    #[tokio::test]
+    async fn returns_room_id_targets_without_lookup() {
+        let client = MatrixClient::new(
+            "https://matrix.example.org",
+            "token".to_owned(),
+            "@bot:e2e.local".to_owned(),
+        )
+        .unwrap();
+        let room_id = client.resolve_room_id("!room:e2e.local").await.unwrap();
+        assert_eq!(room_id, "!room:e2e.local");
+    }
+
+    #[test]
+    fn builds_room_alias_lookup_url() {
+        let client = MatrixClient::new(
+            "https://matrix.example.org",
+            "token".to_owned(),
+            "@bot:e2e.local".to_owned(),
+        )
+        .unwrap();
+        let url = client.room_alias_url("#society:e2e.local").unwrap();
+        assert_eq!(
+            url.as_str(),
+            "https://matrix.example.org/_matrix/client/v3/directory/room/%23society%3Ae2e.local"
+        );
     }
 
     #[test]

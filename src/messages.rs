@@ -1,4 +1,4 @@
-use crate::models::{Candidate, CandidatePeriod, CandidatePeriodKind, Defender};
+use crate::models::{Bid, Candidate, CandidatePeriod, CandidatePeriodKind, Defender};
 use std::time::Duration;
 
 const KSM_DIVISOR: u128 = 1_000_000_000_000;
@@ -84,6 +84,18 @@ pub fn period_message(
     message
 }
 
+pub fn new_bid_message(block_number: u64, bid: &Bid) -> String {
+    format!(
+        "Submitted Society bid at block {block_number} from {} for {} KSM",
+        bid.address_or_handle,
+        format_ksm(bid.bid_plancks)
+    )
+}
+
+pub fn unbid_message(block_number: u64, address_or_handle: &str) -> String {
+    format!("Submitted Society unbid at block {block_number} from {address_or_handle}")
+}
+
 fn candidate_line(candidate: &Candidate) -> String {
     format!(
         "* {}\n  * Bid: {} KSM\n  * Approvals: {}, Rejections: {}\n",
@@ -137,6 +149,30 @@ mod tests {
 
         assert!(message.contains("Bid: 1.5 KSM"));
         assert!(message.contains("Approvals: 3, Rejections: 1"));
+    }
+
+    #[test]
+    fn renders_new_bid_message() {
+        let message = new_bid_message(
+            123,
+            &Bid {
+                address_or_handle: "candidate-a".to_owned(),
+                bid_plancks: 1_500_000_000_000,
+            },
+        );
+
+        assert_eq!(
+            message,
+            "Submitted Society bid at block 123 from candidate-a for 1.5 KSM"
+        );
+    }
+
+    #[test]
+    fn renders_unbid_message() {
+        assert_eq!(
+            unbid_message(123, "candidate-a"),
+            "Submitted Society unbid at block 123 from candidate-a"
+        );
     }
 
     #[test]

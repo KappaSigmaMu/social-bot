@@ -1,4 +1,6 @@
-use crate::models::{Candidate, CandidatePeriod, Defender, MemberInfo, MemberState, Tally};
+use crate::models::{
+    Bid, Candidate, CandidatePeriod, Defender, MemberInfo, MemberState, SocietyEvent, Tally,
+};
 use crate::ss58::{decode_account_id, encode_account_id, is_valid_address, is_valid_matrix_handle};
 use crate::store::OverrideStore;
 use anyhow::{Context, Result, anyhow};
@@ -15,6 +17,7 @@ const KUSAMA_SS58_PREFIX: u16 = 2;
 pub trait ChainData: Send + Sync {
     async fn member_addresses(&self) -> Result<Vec<String>>;
     async fn suspended_member_addresses(&self) -> Result<Vec<String>>;
+    async fn bids_raw(&self) -> Result<Vec<Bid>>;
     async fn candidates_raw(&self) -> Result<Vec<Candidate>>;
     async fn strikes(&self, address: &str) -> Result<u64>;
     async fn defending_raw(&self) -> Result<Defender>;
@@ -88,6 +91,16 @@ where
         Ok(candidates)
     }
 
+    pub async fn get_bids(&self) -> Result<Vec<Bid>> {
+        let mut bids = self.chain.bids_raw().await?;
+        for bid in &mut bids {
+            if let Some(handle) = self.get_matrix_handle(&bid.address_or_handle).await? {
+                bid.address_or_handle = handle;
+            }
+        }
+        Ok(bids)
+    }
+
     pub async fn get_defending(&self) -> Result<Defender> {
         let mut defender = self.chain.defending_raw().await?;
         if let Some(address) = defender.address_or_handle.clone() {
@@ -139,6 +152,10 @@ where
         ))
     }
 
+    pub async fn get_block_number(&self) -> Result<u64> {
+        self.chain.block_number().await
+    }
+
     pub async fn get_head_address(&self) -> Result<Option<String>> {
         self.chain.head_address().await
     }
@@ -185,6 +202,7 @@ where
     }
 }
 
+#[derive(Clone)]
 pub struct SubxtKusama {
     api: OnlineClient<PolkadotConfig>,
 }
@@ -244,10 +262,76 @@ impl SubxtKusama {
         }
         Ok(addresses)
     }
+
+    pub async fn stream_society_events(&self) -> Result<Vec<SocietyEvent>> {
+        let mut blocks = self.api.stream_best_blocks().await?;
+        let mut out = Vec::new();
+        while let Some(block) = blocks.next().await {
+            let block = block?;
+            let block_number = block.number();
+            let at_block = block.at().await?;
+            let events = at_block.events().fetch().await?;
+            for event in events.iter() {
+                let event = event?;
+                if event.pallet_name() != "Society" {
+                    continue;
+                }
+                let values = event.decode_fields_unchecked_as::<Value>()?;
+                let json = value_to_json(values)?;
+                match event.event_name() {
+                    "Bid" => {
+                        let Some(account) = find_account_ids(&json).into_iter().next() else {
+                            continue;
+                        };
+                        out.push(SocietyEvent::Bid {
+                            block_number,
+                            address: encode_account_id(&account, KUSAMA_SS58_PREFIX),
+                            bid_plancks: find_u128_by_key(&json, "offer").unwrap_or_default(),
+                        });
+                    }
+                    "Unbid" => {
+                        let Some(account) = find_account_ids(&json).into_iter().next() else {
+                            continue;
+                        };
+                        out.push(SocietyEvent::Unbid {
+                            block_number,
+                            address: encode_account_id(&account, KUSAMA_SS58_PREFIX),
+                        });
+                    }
+                    _ => {}
+                }
+            }
+            if !out.is_empty() {
+                return Ok(out);
+            }
+        }
+        Ok(out)
+    }
 }
 
 #[async_trait]
 impl ChainData for SubxtKusama {
+    async fn bids_raw(&self) -> Result<Vec<Bid>> {
+        let Some(value) = self.fetch("Society", "Bids").await? else {
+            return Ok(Vec::new());
+        };
+        let json = value_to_json(value)?;
+        let Some(items) = json.as_array() else {
+            return Ok(Vec::new());
+        };
+        let mut bids = Vec::new();
+        for item in items {
+            let Some(account) = find_account_ids(item).into_iter().next() else {
+                continue;
+            };
+            bids.push(Bid {
+                address_or_handle: encode_account_id(&account, KUSAMA_SS58_PREFIX),
+                bid_plancks: find_u128_by_key(item, "value").unwrap_or_default(),
+            });
+        }
+        Ok(bids)
+    }
+
     async fn member_addresses(&self) -> Result<Vec<String>> {
         self.map_addresses("Society", "Members").await
     }
@@ -499,6 +583,7 @@ pub mod tests {
     pub struct FakeChain {
         pub members: HashSet<String>,
         pub suspended: HashSet<String>,
+        pub bids: Vec<Bid>,
         pub candidates: Vec<Candidate>,
         pub defender: Option<String>,
         pub defender_skeptic: Option<String>,
@@ -518,6 +603,10 @@ pub mod tests {
 
         async fn suspended_member_addresses(&self) -> Result<Vec<String>> {
             Ok(self.suspended.iter().cloned().collect())
+        }
+
+        async fn bids_raw(&self) -> Result<Vec<Bid>> {
+            Ok(self.bids.clone())
         }
 
         async fn candidates_raw(&self) -> Result<Vec<Candidate>> {
@@ -623,6 +712,10 @@ pub mod tests {
         chain
             .identities
             .insert(MEMBER.to_owned(), "@onchain:matrix.org".to_owned());
+        chain.bids.push(Bid {
+            address_or_handle: MEMBER.to_owned(),
+            bid_plancks: 123,
+        });
         chain.candidate_skeptic = Some(MEMBER.to_owned());
         chain.defender = Some(MEMBER.to_owned());
         chain.defender_skeptic = Some(MEMBER.to_owned());
@@ -643,6 +736,13 @@ pub mod tests {
         assert_eq!(
             society.get_matrix_handle(MEMBER).await.unwrap().as_deref(),
             Some("@override:matrix.org")
+        );
+        assert_eq!(
+            society.get_bids().await.unwrap(),
+            vec![Bid {
+                address_or_handle: "@override:matrix.org".to_owned(),
+                bid_plancks: 123,
+            }]
         );
         assert_eq!(
             society.get_candidate_skeptic().await.unwrap().as_deref(),

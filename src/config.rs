@@ -13,8 +13,34 @@ pub struct Config {
 }
 
 impl Config {
+    const DEV_RPC_URL: &'static str = "ws://127.0.0.1:8000";
+
     pub fn from_env() -> Result<Self> {
         let _ = dotenvy::dotenv();
+        Self::from_args_and_process_env(env::args().skip(1))
+    }
+
+    #[cfg(test)]
+    fn from_process_env() -> Result<Self> {
+        Self::from_args_and_process_env(std::iter::empty::<String>())
+    }
+
+    fn from_args_and_process_env(args: impl IntoIterator<Item = String>) -> Result<Self> {
+        let mut dev_mode = false;
+        let mut rpc_url_override = None;
+        let mut args = args.into_iter();
+        while let Some(arg) = args.next() {
+            if arg == "--dev" {
+                dev_mode = true;
+                continue;
+            }
+            if arg == "--rpc-url" {
+                let value = args.next().with_context(|| "--rpc-url requires a value")?;
+                rpc_url_override = Some(value);
+                continue;
+            }
+        }
+
         Ok(Self {
             matrix_room: required("MATRIX_ROOM")?,
             matrix_token: required("MATRIX_TOKEN")?,
@@ -22,8 +48,14 @@ impl Config {
                 .unwrap_or_else(|_| "https://matrix.org".to_owned()),
             matrix_user_id: env::var("MATRIX_USER_ID")
                 .unwrap_or_else(|_| "@societybot:matrix.org".to_owned()),
-            rpc_url: env::var("RPC_URL")
-                .unwrap_or_else(|_| "wss://kusama-rpc.polkadot.io/".to_owned()),
+            rpc_url: rpc_url_override.unwrap_or_else(|| {
+                if dev_mode {
+                    Self::DEV_RPC_URL.to_owned()
+                } else {
+                    env::var("RPC_URL")
+                        .unwrap_or_else(|_| "wss://kusama-rpc.polkadot.io/".to_owned())
+                }
+            }),
             db_path: env::var("DB_PATH").unwrap_or_else(|_| "./society_overrides.db".to_owned()),
             prefix: env::var("PREFIX").unwrap_or_else(|_| "!".to_owned()),
         })
@@ -63,7 +95,7 @@ mod tests {
         set_env("MATRIX_ROOM", "!room:e2e.local");
         set_env("MATRIX_TOKEN", "token");
 
-        let config = Config::from_env().unwrap();
+        let config = Config::from_process_env().unwrap();
         assert_eq!(config.matrix_room, "!room:e2e.local");
         assert_eq!(config.matrix_token, "token");
         assert_eq!(config.matrix_homeserver, "https://matrix.org");
@@ -87,7 +119,7 @@ mod tests {
         set_env("DB_PATH", "/tmp/society.db");
         set_env("PREFIX", "?");
 
-        let config = Config::from_env().unwrap();
+        let config = Config::from_process_env().unwrap();
         assert_eq!(config.matrix_homeserver, "http://matrix:8008");
         assert_eq!(config.matrix_user_id, "@bot:e2e.local");
         assert_eq!(config.rpc_url, "ws://chopsticks:8000");
@@ -98,11 +130,60 @@ mod tests {
     }
 
     #[test]
+    fn command_line_rpc_url_overrides_env() {
+        let _guard = env_lock().lock().unwrap();
+        clear_env();
+        set_env("MATRIX_ROOM", "!room:e2e.local");
+        set_env("MATRIX_TOKEN", "token");
+        set_env("RPC_URL", "wss://asset-hub-kusama-rpc.n.dwellir.com");
+
+        let config = Config::from_args_and_process_env([
+            "--rpc-url".to_owned(),
+            "ws://127.0.0.1:8000".to_owned(),
+        ])
+        .unwrap();
+        assert_eq!(config.rpc_url, "ws://127.0.0.1:8000");
+
+        clear_env();
+    }
+
+    #[test]
+    fn dev_flag_overrides_env_rpc_url() {
+        let _guard = env_lock().lock().unwrap();
+        clear_env();
+        set_env("MATRIX_ROOM", "!room:e2e.local");
+        set_env("MATRIX_TOKEN", "token");
+        set_env("RPC_URL", "wss://asset-hub-kusama-rpc.n.dwellir.com");
+
+        let config = Config::from_args_and_process_env(["--dev".to_owned()]).unwrap();
+        assert_eq!(config.rpc_url, Config::DEV_RPC_URL);
+
+        clear_env();
+    }
+
+    #[test]
+    fn command_line_rpc_url_requires_value() {
+        let _guard = env_lock().lock().unwrap();
+        clear_env();
+        set_env("MATRIX_ROOM", "!room:e2e.local");
+        set_env("MATRIX_TOKEN", "token");
+
+        assert!(
+            Config::from_args_and_process_env(["--rpc-url".to_owned()])
+                .unwrap_err()
+                .to_string()
+                .contains("--rpc-url requires a value")
+        );
+
+        clear_env();
+    }
+
+    #[test]
     fn requires_matrix_room_and_token() {
         let _guard = env_lock().lock().unwrap();
         clear_env();
         assert!(
-            Config::from_env()
+            Config::from_process_env()
                 .unwrap_err()
                 .to_string()
                 .contains("MATRIX_ROOM")
@@ -110,7 +191,7 @@ mod tests {
 
         set_env("MATRIX_ROOM", "!room:e2e.local");
         assert!(
-            Config::from_env()
+            Config::from_process_env()
                 .unwrap_err()
                 .to_string()
                 .contains("MATRIX_TOKEN")
