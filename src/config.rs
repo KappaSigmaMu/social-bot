@@ -10,6 +10,7 @@ pub struct Config {
     pub rpc_url: String,
     pub db_path: String,
     pub prefix: String,
+    pub sample_mode: bool,
 }
 
 impl Config {
@@ -27,11 +28,16 @@ impl Config {
 
     fn from_args_and_process_env(args: impl IntoIterator<Item = String>) -> Result<Self> {
         let mut dev_mode = false;
+        let mut sample_mode = false;
         let mut rpc_url_override = None;
         let mut args = args.into_iter();
         while let Some(arg) = args.next() {
             if arg == "--dev" {
                 dev_mode = true;
+                continue;
+            }
+            if arg == "--sample" {
+                sample_mode = true;
                 continue;
             }
             if arg == "--rpc-url" {
@@ -58,6 +64,7 @@ impl Config {
             }),
             db_path: env::var("DB_PATH").unwrap_or_else(|_| "./society_overrides.db".to_owned()),
             prefix: env::var("PREFIX").unwrap_or_else(|_| "!".to_owned()),
+            sample_mode,
         })
     }
 }
@@ -103,6 +110,7 @@ mod tests {
         assert_eq!(config.rpc_url, "wss://kusama-rpc.polkadot.io/");
         assert_eq!(config.db_path, "./society_overrides.db");
         assert_eq!(config.prefix, "!");
+        assert!(!config.sample_mode);
 
         clear_env();
     }
@@ -125,6 +133,7 @@ mod tests {
         assert_eq!(config.rpc_url, "ws://chopsticks:8000");
         assert_eq!(config.db_path, "/tmp/society.db");
         assert_eq!(config.prefix, "?");
+        assert!(!config.sample_mode);
 
         clear_env();
     }
@@ -174,6 +183,19 @@ mod tests {
                 .to_string()
                 .contains("--rpc-url requires a value")
         );
+
+        clear_env();
+    }
+
+    #[test]
+    fn sample_flag_enables_sample_mode() {
+        let _guard = env_lock().lock().unwrap();
+        clear_env();
+        set_env("MATRIX_ROOM", "!room:e2e.local");
+        set_env("MATRIX_TOKEN", "token");
+
+        let config = Config::from_args_and_process_env(["--sample".to_owned()]).unwrap();
+        assert!(config.sample_mode);
 
         clear_env();
     }

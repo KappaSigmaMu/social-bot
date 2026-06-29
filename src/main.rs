@@ -13,16 +13,24 @@ async fn main() -> Result<()> {
         .init();
 
     let config = Config::from_env()?;
-    let store = OverrideStore::open(&config.db_path)?;
-    let chain = SubxtKusama::connect(&config.rpc_url).await?;
-    let event_chain = chain.clone();
-    let society = Arc::new(Society::new(chain, store));
     let matrix = MatrixClient::new(
         &config.matrix_homeserver,
         config.matrix_token,
         config.matrix_user_id,
     )?;
     let room_id = matrix.resolve_room_id(&config.matrix_room).await?;
+
+    if config.sample_mode {
+        matrix
+            .send_message(&room_id, "Sample message from element-bot")
+            .await?;
+        return Ok(());
+    }
+
+    let store = OverrideStore::open(&config.db_path)?;
+    let chain = SubxtKusama::connect(&config.rpc_url).await?;
+    let event_chain = chain.clone();
+    let society = Arc::new(Society::new(chain, store));
 
     let period_matrix = matrix.clone();
     let period_room = room_id.clone();

@@ -35,6 +35,12 @@ To point the bot at local Chopsticks without editing `.env`, pass:
 cargo run -- --dev
 ```
 
+To send one sample Matrix message to the configured room and exit:
+
+```sh
+cargo run -- --sample
+```
+
 Required:
 
 - `MATRIX_ROOM`: Matrix room ID (for example `!room:matrix.org`) or room alias (for example `#room:matrix.org`).
