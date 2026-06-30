@@ -1,20 +1,19 @@
-use crate::models::{Bid, Candidate, CandidatePeriod, CandidatePeriodKind, Defender};
+use crate::models::{Bid, Candidate, CandidatePeriod, CandidatePeriodKind, Defender, MemberInfo};
 use std::time::Duration;
 
 const KSM_DIVISOR: u128 = 1_000_000_000_000;
 
 pub fn candidates_message(candidates: &[Candidate]) -> String {
+    let mut message = String::from("**Candidates**\n");
     match candidates {
-        [] => "There are no candidates\n".to_owned(),
-        [candidate] => candidate_line(candidate),
+        [] => message.push_str("None."),
         candidates => {
-            let mut message = "The current candidates are:\n".to_owned();
             for candidate in candidates {
                 message.push_str(&candidate_line(candidate));
             }
-            message
         }
     }
+    message
 }
 
 pub fn period_message(
@@ -27,25 +26,23 @@ pub fn period_message(
 ) -> String {
     let mut message = String::new();
     if new_period {
-        message.push_str("A new candidate period has started.\n\n");
+        message.push_str("**New voting period started**\n\n");
     }
 
     match candidate_period.kind {
         CandidatePeriodKind::Voting => {
             message.push_str(&format!(
-                "We are currently in the voting period. Candidates should provide proof of ink. Members should vote on candidates. Blocks until end of voting period: {} ({})\n \n{}",
+                "**Voting**\nCandidates submit ink proofs. Members vote on candidates.\n{} blocks remaining ({}).\n\n",
                 candidate_period.voting_blocks_left,
                 format_duration(candidate_period.voting_time_left()),
-                candidates_message(candidates),
             ));
-            message.push_str(&format!(
-                "\nThe current head is {}.\n",
-                head.unwrap_or("None")
-            ));
+            message.push_str(&candidates_message(candidates));
+            message.push('\n');
+            message.push_str(&head_message(head));
         }
         CandidatePeriodKind::Claim => {
             message.push_str(&format!(
-                "We are currently in the claim period. If you were a candidate in the previous period and received a clear majority of votes, you may now claim your membership. Blocks until end of claim period: {} ({})\n",
+                "**Claim period**\nCandidates with a clear majority may claim membership.\n{} blocks remaining ({}).\n\n",
                 candidate_period.claim_blocks_left,
                 format_duration(candidate_period.claim_time_left()),
             ));
@@ -53,57 +50,111 @@ pub fn period_message(
     }
 
     message.push_str(&format!(
-        "\nThe current skeptic for the candidates is {}.\n\n-----\n\n",
-        candidate_skeptic.unwrap_or("None")
+        "\n**Candidate skeptic:** {}\n\n",
+        format_account(candidate_skeptic)
     ));
 
     if candidate_period.kind == CandidatePeriodKind::Voting && new_period {
-        message.push_str("A new challenge period has also started.\n\n");
+        message.push_str("**New challenge period started**\n\n");
     }
 
     message.push_str(&format!(
-        "There are currently {} blocks ({}) until the end of the challenge period.\n\n",
+        "**Challenge**\n{} blocks until end ({}).\n\n",
         candidate_period.challenge_blocks_left(),
         format_duration(candidate_period.challenge_time_left()),
     ));
 
+    message.push_str(&defender_message(defender_info, !new_period));
     message.push_str(&format!(
-        "The current defender is {}.\n",
-        defender_info.address_or_handle.as_deref().unwrap_or("None")
-    ));
-    if !new_period {
-        message.push_str(&format!(
-            "  * Approvals: {}\n  * Rejections: {}\n",
-            defender_info.tally.approvals, defender_info.tally.rejections
-        ));
-    }
-    message.push_str(&format!(
-        "\nThe current skeptic for the defender is {}.\n",
-        defender_info.skeptic.as_deref().unwrap_or("None")
+        "\n**Defender skeptic:** {}",
+        format_account(defender_info.skeptic.as_deref())
     ));
     message
 }
 
+pub fn defender_message(defender: &Defender, include_tally: bool) -> String {
+    let mut message = format!(
+        "**Defender:** {}",
+        format_account(defender.address_or_handle.as_deref())
+    );
+    if include_tally {
+        message.push_str(&format!(
+            "\n· {} approvals · {} rejections",
+            defender.tally.approvals, defender.tally.rejections
+        ));
+    }
+    message
+}
+
+pub fn head_message(head: Option<&str>) -> String {
+    format!("**Head:** {}", format_account(head))
+}
+
+pub fn member_info_message(info: &MemberInfo) -> String {
+    format!(
+        "**Member**\n· Address: `{}`\n· State: {}\n· Element: {}\n· Strikes: {}\n· Roles: {}",
+        info.address,
+        info.state,
+        format_account(info.element_handle.as_deref()),
+        info.strikes,
+        format_roles(info.is_founder, info.is_defender),
+    )
+}
+
+pub fn skeptics_message(defender_skeptic: Option<&str>, candidate_skeptic: Option<&str>) -> String {
+    format!(
+        "**Defender skeptic:** {}\n**Candidate skeptic:** {}",
+        format_account(defender_skeptic),
+        format_account(candidate_skeptic),
+    )
+}
+
+pub fn candidate_not_found_message(address: &str) -> String {
+    format!("No candidate matching `{address}`.")
+}
+
 pub fn new_bid_message(block_number: u64, bid: &Bid) -> String {
     format!(
-        "Submitted Society bid at block {block_number} from {} for {} KSM",
+        "**New bid** (block {block_number})\n· `{}` — {} KSM\n",
         bid.address_or_handle,
         format_ksm(bid.bid_plancks)
     )
 }
 
 pub fn unbid_message(block_number: u64, address_or_handle: &str) -> String {
-    format!("Submitted Society unbid at block {block_number} from {address_or_handle}")
+    format!("**Withdrawn bid** (block {block_number})\n· `{address_or_handle}`\n")
 }
 
 fn candidate_line(candidate: &Candidate) -> String {
     format!(
-        "* {}\n  * Bid: {} KSM\n  * Approvals: {}, Rejections: {}\n",
+        "· `{}` — {} KSM · {} approvals · {} rejections\n",
         candidate.address_or_handle,
         format_ksm(candidate.bid_plancks),
         candidate.tally.approvals,
-        candidate.tally.rejections
+        candidate.tally.rejections,
     )
+}
+
+fn format_account(account: Option<&str>) -> String {
+    match account {
+        Some(account) => format!("`{account}`"),
+        None => "none".to_owned(),
+    }
+}
+
+fn format_roles(is_founder: bool, is_defender: bool) -> String {
+    let mut roles = Vec::new();
+    if is_founder {
+        roles.push("founder");
+    }
+    if is_defender {
+        roles.push("defender");
+    }
+    if roles.is_empty() {
+        "none".to_owned()
+    } else {
+        roles.join(", ")
+    }
 }
 
 fn format_ksm(plancks: u128) -> String {
@@ -123,17 +174,17 @@ fn format_duration(duration: Duration) -> String {
     let hours = seconds % 86_400 / 3_600;
     let minutes = seconds % 3_600 / 60;
     let seconds = seconds % 60;
-    format!("{days} days, {hours} hours, {minutes} minutes, {seconds} seconds")
+    format!("{days}d {hours}h {minutes}m {seconds}s")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::Tally;
+    use crate::models::{MemberState, Tally};
 
     #[test]
     fn renders_no_candidates() {
-        assert_eq!(candidates_message(&[]), "There are no candidates\n");
+        assert_eq!(candidates_message(&[]), "**Candidates**\nNone.");
     }
 
     #[test]
@@ -147,8 +198,8 @@ mod tests {
             },
         }]);
 
-        assert!(message.contains("Bid: 1.5 KSM"));
-        assert!(message.contains("Approvals: 3, Rejections: 1"));
+        assert!(message.contains("· `@candidate:matrix.org` — 1.5 KSM"));
+        assert!(message.contains("3 approvals · 1 rejections"));
     }
 
     #[test]
@@ -163,7 +214,7 @@ mod tests {
 
         assert_eq!(
             message,
-            "Submitted Society bid at block 123 from candidate-a for 1.5 KSM"
+            "**New bid** (block 123)\n· `candidate-a` — 1.5 KSM\n"
         );
     }
 
@@ -171,7 +222,7 @@ mod tests {
     fn renders_unbid_message() {
         assert_eq!(
             unbid_message(123, "candidate-a"),
-            "Submitted Society unbid at block 123 from candidate-a"
+            "**Withdrawn bid** (block 123)\n· `candidate-a`\n"
         );
     }
 
@@ -197,9 +248,9 @@ mod tests {
         ];
 
         let message = candidates_message(&candidates);
-        assert!(message.starts_with("The current candidates are:"));
-        assert!(message.contains("* candidate-a"));
-        assert!(message.contains("* candidate-b"));
+        assert!(message.starts_with("**Candidates**\n"));
+        assert!(message.contains("· `candidate-a`"));
+        assert!(message.contains("· `candidate-b`"));
     }
 
     #[test]
@@ -222,10 +273,10 @@ mod tests {
             true,
         );
 
-        assert!(message.contains("A new candidate period has started."));
-        assert!(message.contains("A new challenge period has also started."));
-        assert!(message.contains("The current head is @head:matrix.org."));
-        assert!(!message.contains("Approvals: 10"));
+        assert!(message.contains("**New voting period started**"));
+        assert!(message.contains("**New challenge period started**"));
+        assert!(message.contains("**Head:** `@head:matrix.org`"));
+        assert!(!message.contains("approvals"));
     }
 
     #[test]
@@ -241,9 +292,25 @@ mod tests {
         };
         let message = period_message(&period, &defender, &[], None, None, false);
 
-        assert!(message.contains("We are currently in the claim period."));
-        assert!(message.contains("The current defender is None."));
-        assert!(message.contains("Approvals: 8"));
-        assert!(message.contains("The current skeptic for the candidates is None."));
+        assert!(message.contains("**Claim period**"));
+        assert!(message.contains("**Defender:** none"));
+        assert!(message.contains("8 approvals · 6 rejections"));
+        assert!(message.contains("**Candidate skeptic:** none"));
+    }
+
+    #[test]
+    fn renders_member_info_and_roles() {
+        let message = member_info_message(&MemberInfo {
+            address: "addr".to_owned(),
+            state: MemberState::Member,
+            element_handle: Some("@member:matrix.org".to_owned()),
+            strikes: 2,
+            is_founder: true,
+            is_defender: false,
+        });
+
+        assert!(message.contains("**Member**"));
+        assert!(message.contains("· State: member"));
+        assert!(message.contains("· Roles: founder"));
     }
 }

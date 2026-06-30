@@ -92,53 +92,52 @@ def main():
         (
             "head query through Chopsticks",
             "!head",
-            lambda body: body.startswith("The current head is `")
-            or body == "There is no head, something must have gone horribly wrong",
+            lambda body: body.startswith("Head: ") and body != "Head: none",
         ),
         (
             "period summary through Chopsticks",
             "!period",
-            contains_all("We are currently in the", "challenge period"),
+            contains_all("Voting", "Challenge"),
         ),
         (
             "defender query through Chopsticks",
             "!defender",
-            lambda body: "current defender" in body or body == "There is no defender",
+            lambda body: body.startswith("Defender:"),
         ),
         (
             "skeptics query through Chopsticks",
             "!skeptics",
-            contains_all("skeptic"),
+            contains_all("Defender skeptic:", "Candidate skeptic:"),
         ),
         (
             "candidate list through Chopsticks",
             "!candidates",
-            lambda body: "candidate" in body.lower(),
+            lambda body: body.startswith("Candidates"),
         ),
         (
             "candidate miss through Chopsticks",
             f"!candidates {KNOWN_KUSAMA_ADDRESS}",
-            contains_all("No candidate with address", KNOWN_KUSAMA_ADDRESS),
+            contains_all("No candidate matching", KNOWN_KUSAMA_ADDRESS),
         ),
         (
             "member info through Chopsticks",
             f"!info {KNOWN_KUSAMA_ADDRESS}",
-            contains_all("* **Address**:", "* **State**:"),
+            contains_all("Member", "· Address:"),
         ),
         (
             "address override write",
             f"!set_address {KNOWN_KUSAMA_ADDRESS}",
-            contains_all("Set matrix handle", KNOWN_KUSAMA_ADDRESS),
+            contains_all("Linked", KNOWN_KUSAMA_ADDRESS),
         ),
         (
             "address override read",
             "!me",
-            contains_all("* **Address**:", KNOWN_KUSAMA_ADDRESS),
+            contains_all("Member", KNOWN_KUSAMA_ADDRESS),
         ),
         (
             "address override delete",
             "!unset_address",
-            contains_all("Unset address"),
+            contains_all("Removed address link"),
         ),
     ]
 

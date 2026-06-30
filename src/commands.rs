@@ -1,5 +1,8 @@
 use crate::chain::{ChainData, Society};
-use crate::messages::{candidates_message, period_message};
+use crate::messages::{
+    candidate_not_found_message, candidates_message, defender_message, head_message,
+    member_info_message, period_message, skeptics_message,
+};
 use anyhow::Result;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -27,11 +30,8 @@ where
         "defender" => {
             let defender = society.get_defending().await?;
             match defender.address_or_handle {
-                Some(address) => format!(
-                    "The current defender is {address}. So far they have {} approvals and {} rejections.",
-                    defender.tally.approvals, defender.tally.rejections
-                ),
-                None => "There is no defender".to_owned(),
+                Some(_) => defender_message(&defender, true),
+                None => "**Defender:** none".to_owned(),
             }
         }
         "info" => {
@@ -39,62 +39,43 @@ where
                 return Ok(Some("Usage: `!info <address>`".to_owned()));
             };
             let info = society.get_member_info(address).await?;
-            format!(
-                "* **Address**: {}\n* **State**: {}\n* **Element_handle**: {}\n* **Strikes**: {}\n* **Is_founder**: {}\n* **Is_defender**: {}\n",
-                info.address,
-                info.state,
-                info.element_handle.as_deref().unwrap_or("None"),
-                info.strikes,
-                info.is_founder,
-                info.is_defender,
-            )
+            member_info_message(&info)
         }
         "candidates" => {
             let candidates = society.get_candidates().await?;
             if let Some(address) = parts.next() {
                 match candidates.iter().find(|candidate| candidate.address_or_handle == address) {
                     Some(candidate) => candidates_message(std::slice::from_ref(candidate)),
-                    None => format!("No candidate with address `{address}`"),
+                    None => candidate_not_found_message(address),
                 }
             } else {
                 candidates_message(&candidates)
             }
         }
-        "head" => match society.get_head_address().await? {
-            Some(head) => format!("The current head is `{head}`"),
-            None => "There is no head, something must have gone horribly wrong".to_owned(),
-        },
+        "head" => head_message(society.get_head_address().await?.as_deref()),
         "set_address" => {
             let Some(address) = parts.next() else {
                 return Ok(Some("Usage: `!set_address <address>`".to_owned()));
             };
             if society.set_matrix_handle(address, sender)? {
-                format!("Set matrix handle {sender} for address `{address}`")
+                format!("Linked `{address}` to {sender}.")
             } else {
-                format!("Failed to set matrix handle {sender} for address `{address}`")
+                format!("Could not link `{address}` to {sender}.")
             }
         }
         "unset_address" => {
             if society.unset_matrix_handle(sender)? {
-                format!("Unset address for {sender}")
+                format!("Removed address link for {sender}.")
             } else {
-                format!("Failed to unset address for {sender}")
+                format!("No address link to remove for {sender}.")
             }
         }
         "me" => match society.get_address_for_matrix_handle(sender)? {
             Some(address) => {
                 let info = society.get_member_info(&address).await?;
-                format!(
-                    "* **Address**: {}\n* **State**: {}\n* **Element_handle**: {}\n* **Strikes**: {}\n* **Is_founder**: {}\n* **Is_defender**: {}\n",
-                    info.address,
-                    info.state,
-                    info.element_handle.as_deref().unwrap_or("None"),
-                    info.strikes,
-                    info.is_founder,
-                    info.is_defender,
-                )
+                member_info_message(&info)
             }
-            None => "You have not set your address yet. To do so, use `!set_address <address>`. Note that the !me command does not currently support addresses with an on-chain identity set.".to_owned(),
+            None => "No address linked yet. Use `!set_address <address>`.\nOn-chain identities are not supported by `!me`.".to_owned(),
         },
         "period" => {
             let period = society.get_candidate_period().await?;
@@ -114,20 +95,10 @@ where
         "skeptics" | "skeptic" => {
             let defender = society.get_defending().await?;
             let candidate_skeptic = society.get_candidate_skeptic().await?;
-            let mut message = String::new();
-            match defender.skeptic {
-                Some(skeptic) => {
-                    message.push_str(&format!("The current skeptic for the defender is {skeptic}\n\n"));
-                }
-                None => message.push_str("There is no skeptic for the current defender.\n\n"),
-            }
-            match candidate_skeptic {
-                Some(skeptic) => {
-                    message.push_str(&format!("The current skeptic for the candidates is {skeptic}"));
-                }
-                None => message.push_str("There is no skeptic for the current candidates."),
-            }
-            message
+            skeptics_message(
+                defender.skeptic.as_deref(),
+                candidate_skeptic.as_deref(),
+            )
         }
         _ => return Ok(None),
     };
@@ -144,7 +115,7 @@ fn ping_response(server_timestamp_ms: Option<u64>) -> String {
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or_default();
     let roundtrip = now.saturating_sub(server_timestamp_ms);
-    format!("Pong! Took {roundtrip}ms")
+    format!("Pong! ({roundtrip} ms)")
 }
 
 #[cfg(test)]
@@ -181,13 +152,13 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
-        assert!(response.contains("Set matrix handle"));
+        assert!(response.contains("Linked"));
 
         let response = handle_command(&society, "!", "@testuser:matrix.org", "!me", None)
             .await
             .unwrap()
             .unwrap();
-        assert!(response.contains("* **State**: member"));
+        assert!(response.contains("· State: member"));
     }
 
     #[tokio::test]
@@ -213,8 +184,8 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
-        assert!(response.contains("Approvals: 7"));
-        assert!(response.contains("Bid: 2 KSM"));
+        assert!(response.contains("7 approvals"));
+        assert!(response.contains("2 KSM"));
     }
 
     #[tokio::test]
@@ -270,7 +241,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap()
-            .contains("Failed to set matrix handle")
+            .contains("Could not link")
         );
         assert!(
             handle_command(
@@ -283,14 +254,14 @@ mod tests {
             .await
             .unwrap()
             .unwrap()
-            .contains("Failed to unset address")
+            .contains("No address link to remove")
         );
         assert!(
             handle_command(&society, "!", "@testuser:matrix.org", "!me", None)
                 .await
                 .unwrap()
                 .unwrap()
-                .contains("You have not set your address yet")
+                .contains("No address linked yet")
         );
     }
 
@@ -322,21 +293,21 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert!(ping.starts_with("Pong! Took "));
+        assert!(ping.starts_with("Pong! ("));
 
         assert!(
             handle_command(&society, "!", "@testuser:matrix.org", "!defender", None)
                 .await
                 .unwrap()
                 .unwrap()
-                .contains("So far they have 1 approvals and 2 rejections")
+                .contains("1 approvals · 2 rejections")
         );
         assert_eq!(
             handle_command(&society, "!", "@testuser:matrix.org", "!head", None)
                 .await
                 .unwrap()
                 .unwrap(),
-            format!("The current head is `{MEMBER}`")
+            format!("**Head:** `{MEMBER}`")
         );
         assert!(
             handle_command(
@@ -349,28 +320,28 @@ mod tests {
             .await
             .unwrap()
             .unwrap()
-            .contains("* **Strikes**: 5")
+            .contains("· Strikes: 5")
         );
         assert!(
             handle_command(&society, "!", "@testuser:matrix.org", "!period", None)
                 .await
                 .unwrap()
                 .unwrap()
-                .contains("We are currently in the voting period")
+                .contains("**Voting**")
         );
         assert!(
             handle_command(&society, "!", "@testuser:matrix.org", "!skeptics", None)
                 .await
                 .unwrap()
                 .unwrap()
-                .contains("The current skeptic for the defender")
+                .contains("**Defender skeptic:**")
         );
         assert!(
             handle_command(&society, "!", "@testuser:matrix.org", "!skeptic", None)
                 .await
                 .unwrap()
                 .unwrap()
-                .contains("The current skeptic for the candidates")
+                .contains("**Candidate skeptic:**")
         );
     }
 
@@ -383,21 +354,21 @@ mod tests {
                 .await
                 .unwrap()
                 .unwrap(),
-            "There is no defender"
+            "**Defender:** none"
         );
-        assert!(
+        assert_eq!(
             handle_command(&society, "!", "@testuser:matrix.org", "!head", None)
                 .await
                 .unwrap()
-                .unwrap()
-                .contains("There is no head")
+                .unwrap(),
+            "**Head:** none"
         );
         assert!(
             handle_command(&society, "!", "@testuser:matrix.org", "!skeptics", None)
                 .await
                 .unwrap()
                 .unwrap()
-                .contains("There is no skeptic for the current defender")
+                .contains("none")
         );
         assert!(
             handle_command(
@@ -410,7 +381,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap()
-            .contains("No candidate with address")
+            .contains("No candidate matching")
         );
     }
 }

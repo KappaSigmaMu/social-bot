@@ -283,67 +283,24 @@ impl SubxtKusama {
             let block = block?;
             let block_number = block.number();
             let block_hash = block.hash().0;
-            info!(block_number, ?block_hash, "received blockchain block");
             let at_block = block.at().await?;
             let events = at_block.events().fetch().await?;
             for event in events.iter() {
                 let event = event?;
-                let pallet_name = event.pallet_name();
+                if event.pallet_name() != "Society" {
+                    continue;
+                }
                 let event_name = event.event_name();
                 let event_index = event.index();
                 let values = event.decode_fields_unchecked_as::<Value>()?;
                 let json = value_to_json(values)?;
-                info!(
-                    block_number,
-                    event_index,
-                    pallet = pallet_name,
-                    event = event_name,
-                    fields = %json,
-                    "received blockchain event"
-                );
-                if pallet_name != "Society" {
-                    continue;
-                }
                 let Some(society_event) =
                     parse_society_event(block_number, block_hash, event_index, event_name, &json)
                 else {
                     continue;
                 };
+                info!(?society_event, "observed society event");
                 on_event(society_event).await?;
-            }
-        }
-        Ok(())
-    }
-
-    pub async fn log_all_chain_activity(&self) -> Result<()> {
-        info!("starting raw blockchain observer");
-        let mut blocks = self.api.stream_best_blocks().await?;
-        while let Some(block) = blocks.next().await {
-            let block = block?;
-            let block_number = block.number();
-            let block_hash = block.hash();
-            info!(block_number, ?block_hash, "observed blockchain block");
-
-            let at_block = block.at().await?;
-            let events = at_block.events().fetch().await?;
-            if events.is_empty() {
-                info!(block_number, "observed block with no events");
-                continue;
-            }
-
-            for event in events.iter() {
-                let event = event?;
-                let pallet_name = event.pallet_name();
-                let event_name = event.event_name();
-                let values = event.decode_fields_unchecked_as::<Value>()?;
-                let json = value_to_json(values)?;
-                info!(
-                    block_number,
-                    pallet = pallet_name,
-                    event = event_name,
-                    fields = %json,
-                    "observed blockchain event"
-                );
             }
         }
         Ok(())

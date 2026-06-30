@@ -51,6 +51,11 @@ impl MatrixClient {
             .await?
             .error_for_status()
             .context("sending Matrix message")?;
+        info!(
+            room_id,
+            message = strip_markdown(body),
+            "sent Matrix message"
+        );
         Ok(())
     }
 
@@ -308,8 +313,88 @@ fn parse_room_target(value: &str) -> Result<RoomTarget> {
 fn message_payload(body: &str) -> serde_json::Value {
     json!({
         "msgtype": "m.text",
-        "body": body,
+        "body": strip_markdown(body),
+        "format": "org.matrix.custom.html",
+        "formatted_body": markdown_to_html(body),
     })
+}
+
+fn escape_html(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            ch => out.push(ch),
+        }
+    }
+    out
+}
+
+fn read_until_delimiter(input: &str, start: usize, delimiter: &str) -> Option<(String, usize)> {
+    let end = input[start..].find(delimiter)? + start;
+    Some((input[start..end].to_owned(), end + delimiter.len()))
+}
+
+fn markdown_to_html(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut index = 0;
+    while index < input.len() {
+        if input[index..].starts_with("**")
+            && let Some((content, next)) = read_until_delimiter(input, index + 2, "**")
+        {
+            out.push_str("<strong>");
+            out.push_str(&escape_html(&content));
+            out.push_str("</strong>");
+            index = next;
+            continue;
+        }
+        if input.as_bytes()[index] == b'`'
+            && let Some((content, next)) = read_until_delimiter(input, index + 1, "`")
+        {
+            out.push_str("<code>");
+            out.push_str(&escape_html(&content));
+            out.push_str("</code>");
+            index = next;
+            continue;
+        }
+        if input.as_bytes()[index] == b'\n' {
+            out.push_str("<br/>");
+            index += 1;
+            continue;
+        }
+        let ch = input[index..].chars().next().expect("valid utf-8");
+        out.push_str(&escape_html(ch.to_string().as_str()));
+        index += ch.len_utf8();
+    }
+    out
+}
+
+fn strip_markdown(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut index = 0;
+    while index < input.len() {
+        if input[index..].starts_with("**")
+            && let Some((content, next)) = read_until_delimiter(input, index + 2, "**")
+        {
+            out.push_str(&content);
+            index = next;
+            continue;
+        }
+        if input.as_bytes()[index] == b'`'
+            && let Some((content, next)) = read_until_delimiter(input, index + 1, "`")
+        {
+            out.push_str(&content);
+            index = next;
+            continue;
+        }
+        let ch = input[index..].chars().next().expect("valid utf-8");
+        out.push(ch);
+        index += ch.len_utf8();
+    }
+    out
 }
 
 #[derive(Debug, Deserialize)]
@@ -484,7 +569,7 @@ mod tests {
 
         let (kind, message) = period_snapshot(&society).await.unwrap();
         assert_eq!(kind, CandidatePeriodKind::Voting);
-        assert!(message.contains("A new candidate period has started."));
+        assert!(message.contains("**New voting period started**"));
         assert!(message.contains("@candidate:matrix.org"));
     }
 
@@ -514,7 +599,27 @@ mod tests {
         );
         assert_eq!(
             message_payload("hello"),
-            serde_json::json!({"msgtype": "m.text", "body": "hello"})
+            serde_json::json!({
+                "msgtype": "m.text",
+                "body": "hello",
+                "format": "org.matrix.custom.html",
+                "formatted_body": "hello",
+            })
+        );
+        let payload = message_payload("**Head:** `alice`\n· item");
+        assert_eq!(payload["body"], "Head: alice\n· item");
+        assert_eq!(
+            payload["formatted_body"],
+            "<strong>Head:</strong> <code>alice</code><br/>· item"
+        );
+    }
+
+    #[test]
+    fn escapes_html_in_matrix_messages() {
+        let payload = message_payload("**Alert** `<script>`");
+        assert_eq!(
+            payload["formatted_body"],
+            "<strong>Alert</strong> <code>&lt;script&gt;</code>"
         );
     }
 }

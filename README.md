@@ -19,7 +19,7 @@ The bot supports the original command set:
 - `!skeptic`
 
 It also polls the Kusama candidate period every 60 seconds and announces period transitions to the configured Matrix room.
-It subscribes to chain blocks, logs observed blocks/events, and announces Society `Bid` and `Unbid` events to the configured Matrix room.
+It subscribes to chain blocks and announces bid and unbid events to the configured Matrix room.
 
 ## Configuration
 
@@ -179,9 +179,9 @@ cargo society:bid
 cargo society:unbid
 ```
 
-The bot should log observed blocks/events and send exactly one Matrix message per Society bid/unbid event, keyed by block hash and event index. If the bot restarts, in-memory dedupe resets and a previously announced event could be announced again.
+The bot should log observed bid/unbid events and send exactly one Matrix message per event, keyed by block hash and event index. If the bot restarts, in-memory dedupe resets and a previously announced event could be announced again.
 
-- `Submitted Society bid at block X from Y for Z KSM`
-- `Submitted Society unbid at block X from Y`
+- `**New bid** (block X)` with the bidder and amount in KSM
+- `**Withdrawn bid** (block X)` with the account
 
 If Chopsticks logs `Method not found: transactionWatch_v1_submitAndWatch`, the caller is using an unsupported transaction-watch RPC. The local `submit_bid` and `unbid` helpers avoid that path and submit through the legacy-compatible extrinsic RPC.
