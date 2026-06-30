@@ -39,7 +39,7 @@ where
                 return Ok(Some("Usage: `!info <address>`".to_owned()));
             };
             let info = society.get_member_info(address).await?;
-            member_info_message(&info)
+            member_info_message(&info, true)
         }
         "candidates" => {
             let candidates = society.get_candidates().await?;
@@ -73,7 +73,7 @@ where
         "me" => match society.get_address_for_matrix_handle(sender)? {
             Some(address) => {
                 let info = society.get_member_info(&address).await?;
-                member_info_message(&info)
+                member_info_message(&info, false)
             }
             None => "No address linked yet. Use `!set_address <address>`.\nOn-chain identities are not supported by `!me`.".to_owned(),
         },

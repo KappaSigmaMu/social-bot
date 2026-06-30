@@ -66,6 +66,23 @@ pub fn replay_override_history(
             continue;
         }
 
+        if let Some(address) = parse_member_address_from_me_response(&message.body)
+            && let Some(index) = pending_me.iter().rposition(|(_, me_ts)| {
+                message.origin_server_ts >= *me_ts
+                    && message.origin_server_ts.saturating_sub(*me_ts) <= ME_RESPONSE_WINDOW_MS
+            })
+        {
+            let (requester, _) = pending_me.remove(index).expect("index exists");
+            if is_valid_address(&address) && is_valid_matrix_handle(&requester) {
+                stats.me_responses += 1;
+                store.unset_by_matrix_handle(&requester)?;
+                store.set_matrix_handle(&address, &requester)?;
+            } else {
+                stats.invalid_commands += 1;
+            }
+            continue;
+        }
+
         if is_me_no_address_response(&message.body)
             && let Some(index) = pending_me.iter().rposition(|(_, me_ts)| {
                 message.origin_server_ts >= *me_ts
@@ -130,6 +147,37 @@ fn is_me_command(body: &str, prefix: &str) -> bool {
 
 fn is_me_no_address_response(body: &str) -> bool {
     body.contains("not set your address") || body.contains("No address linked yet")
+}
+
+fn parse_member_address_from_me_response(body: &str) -> Option<String> {
+    if !body.starts_with("**Member**") {
+        return None;
+    }
+    parse_member_address_from_response(body)
+}
+
+fn parse_member_address_from_response(body: &str) -> Option<String> {
+    for line in body.lines() {
+        let line = line.trim();
+        let value = if let Some(rest) = line.strip_prefix("* **Address**:") {
+            Some(parse_field_value(rest))
+        } else if let Some(rest) = line.strip_prefix("**Address**:") {
+            Some(parse_field_value(rest))
+        } else if let Some(rest) = line.strip_prefix("· Address:") {
+            Some(parse_field_value(rest))
+        } else if let Some(rest) = line.strip_prefix("Address:") {
+            Some(parse_field_value(rest))
+        } else {
+            None
+        };
+
+        if line.contains("Address") {
+            let value = value?;
+            let (address, _) = split_address_and_handle(&value);
+            return Some(address);
+        }
+    }
+    None
 }
 
 fn parse_member_override_from_response(body: &str) -> Option<(String, String)> {
@@ -298,15 +346,53 @@ mod tests {
             Some((USER.to_owned(), MEMBER.to_owned()))
         );
 
-        let new =
-            format!("**Member**\n· Address: `{MEMBER} ({USER})`\n· Status: member\n· Strikes: 0");
+        let with_handle = format!(
+            "**Member**\n· Address: `{MEMBER} ({USER})`\n· Status: member\n· Strikes: 0"
+        );
         assert_eq!(
-            parse_member_override_from_response(&new),
+            parse_member_override_from_response(&with_handle),
             Some((USER.to_owned(), MEMBER.to_owned()))
+        );
+
+        let without_handle =
+            format!("**Member**\n· Address: `{MEMBER}`\n· Status: member\n· Strikes: 0");
+        assert_eq!(parse_member_override_from_response(&without_handle), None);
+        assert_eq!(
+            parse_member_address_from_me_response(&without_handle).as_deref(),
+            Some(MEMBER)
         );
         assert_eq!(
             parse_member_override_from_response("* **Address**: abc\n* **Element_handle**: None\n"),
             None
+        );
+    }
+
+    #[test]
+    fn replays_address_only_me_responses() {
+        let store = test_store();
+        let stats = replay_override_history(
+            &store,
+            "!",
+            BOT,
+            &[
+                HistoryMessage {
+                    sender: USER.to_owned(),
+                    body: "!me".to_owned(),
+                    origin_server_ts: 1,
+                },
+                HistoryMessage {
+                    sender: BOT.to_owned(),
+                    body: format!("**Member**\n· Address: `{MEMBER}`\n· Status: member\n· Strikes: 0"),
+                    origin_server_ts: 1_500,
+                },
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(stats.me_responses, 1);
+        assert_eq!(
+            store.address_for_matrix_handle(USER).unwrap().as_deref(),
+            Some(MEMBER)
         );
     }
 

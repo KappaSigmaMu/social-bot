@@ -97,13 +97,15 @@ pub fn head_message(head: Option<&str>) -> String {
     format!("**Head:** {}", format_account(head))
 }
 
-pub fn member_info_message(info: &MemberInfo) -> String {
+pub fn member_info_message(info: &MemberInfo, include_handle: bool) -> String {
+    let address = if include_handle {
+        format_address_with_handle(&info.address, info.element_handle.as_deref())
+    } else {
+        info.address.clone()
+    };
     let mut lines = vec![
         "**Member**".to_owned(),
-        format!(
-            "· Address: `{}`",
-            format_address_with_handle(&info.address, info.element_handle.as_deref())
-        ),
+        format!("· Address: `{address}`"),
         format!("· Status: {}", info.state),
         format!("· Strikes: {}", info.strikes),
     ];
@@ -324,14 +326,17 @@ mod tests {
 
     #[test]
     fn renders_member_info_and_roles() {
-        let message = member_info_message(&MemberInfo {
-            address: "addr".to_owned(),
-            state: MemberState::Member,
-            element_handle: Some("@member:matrix.org".to_owned()),
-            strikes: 2,
-            is_founder: true,
-            is_defender: false,
-        });
+        let message = member_info_message(
+            &MemberInfo {
+                address: "addr".to_owned(),
+                state: MemberState::Member,
+                element_handle: Some("@member:matrix.org".to_owned()),
+                strikes: 2,
+                is_founder: true,
+                is_defender: false,
+            },
+            true,
+        );
 
         assert!(message.contains("**Member**"));
         assert!(message.contains("· Address: `addr (@member:matrix.org)`"));
@@ -340,15 +345,36 @@ mod tests {
     }
 
     #[test]
+    fn omits_handle_for_me() {
+        let message = member_info_message(
+            &MemberInfo {
+                address: "addr".to_owned(),
+                state: MemberState::Member,
+                element_handle: Some("@member:matrix.org".to_owned()),
+                strikes: 0,
+                is_founder: false,
+                is_defender: false,
+            },
+            false,
+        );
+
+        assert!(message.contains("· Address: `addr`"));
+        assert!(!message.contains("@member:matrix.org"));
+    }
+
+    #[test]
     fn omits_roles_when_none() {
-        let message = member_info_message(&MemberInfo {
-            address: "addr".to_owned(),
-            state: MemberState::Member,
-            element_handle: None,
-            strikes: 0,
-            is_founder: false,
-            is_defender: false,
-        });
+        let message = member_info_message(
+            &MemberInfo {
+                address: "addr".to_owned(),
+                state: MemberState::Member,
+                element_handle: None,
+                strikes: 0,
+                is_founder: false,
+                is_defender: false,
+            },
+            true,
+        );
 
         assert!(message.contains("· Status: member"));
         assert!(!message.contains("Roles"));
