@@ -185,3 +185,40 @@ The bot should log observed bid/unbid events and send exactly one Matrix message
 - `**Withdrawn bid** (block X)` with the account
 
 If Chopsticks logs `Method not found: transactionWatch_v1_submitAndWatch`, the caller is using an unsupported transaction-watch RPC. The local `submit_bid` and `unbid` helpers avoid that path and submit through the legacy-compatible extrinsic RPC.
+
+## Export and seed
+
+Export a room's full Matrix history, then seed `society_overrides.db` from that export.
+
+**1. Export** — paginates room history and writes JSONL plus media:
+
+```sh
+cargo export --output ./exports/kappasigmamulounge
+```
+
+Defaults to `#kappasigmamulounge:parity.io` when `--room` is omitted. Override with `--room` or set `MATRIX_HOMESERVER` for non-matrix.org homeservers.
+
+Output:
+
+- `events.jsonl` — one JSON object per event (sender, timestamp, body, media URLs)
+- `metadata.json` — export summary
+- `media/` — downloaded attachments (images, files, video, audio)
+
+Use `--links-only` to skip media downloads. Use `--all-events` to include membership/state events.
+
+Retry only missing media from a previous export:
+
+```sh
+cargo export --retry-failed --output ./exports/kappasigmamulounge
+```
+
+**2. Seed** — replays `!set_address` / `!unset_address` from `events.jsonl` into the override database:
+
+```sh
+cargo seed --input ./exports/kappasigmamulounge --dry-run
+cargo seed --input ./exports/kappasigmamulounge --db-path ./society_overrides.db
+```
+
+`cargo seed` reads the export on disk only; it does not call Matrix. Set `MATRIX_USER_ID` in `.env` to the bot account whose messages should be skipped. `--input` defaults to `./room-export`.
+
+Requires a Matrix token and room access for `cargo export` only.

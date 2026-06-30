@@ -2,11 +2,13 @@ use crate::chain::{ChainData, Society, SubxtKusama};
 use crate::commands::handle_command;
 use crate::messages::{new_bid_message, period_message, unbid_message};
 use crate::models::{Bid, CandidatePeriodKind, SeenSocietyEvents, SocietyEvent};
+use crate::overrides_import::HistoryMessage;
 use anyhow::{Context, Result};
 use reqwest::{Client, Url};
 use serde::Deserialize;
 use serde_json::json;
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 use tokio::time::{Duration, sleep};
 use tracing::{error, info};
@@ -121,6 +123,135 @@ impl MatrixClient {
             .await
             .with_context(|| format!("decoding Matrix room alias response for {alias}"))?;
         Ok(response.room_id)
+    }
+
+    pub async fn fetch_all_room_events(
+        &self,
+        room_id: &str,
+        event_types: Option<Vec<String>>,
+    ) -> Result<Vec<RoomTimelineEvent>> {
+        let mut events = Vec::new();
+        let mut from: Option<String> = None;
+        let mut pages = 0_u64;
+        let filter = match event_types {
+            Some(types) if !types.is_empty() => Some(serde_json::to_string(
+                &serde_json::json!({ "types": types }),
+            )?),
+            _ => None,
+        };
+
+        loop {
+            pages += 1;
+            let page = self
+                .fetch_room_messages(room_id, from.as_deref(), 250, "b", filter.as_deref())
+                .await?;
+            let page_events = page.chunk.len();
+            events.extend(page.chunk.into_iter().map(RoomTimelineEvent::from));
+            info!(
+                pages,
+                page_events,
+                total_events = events.len(),
+                "fetched Matrix history page"
+            );
+
+            let Some(next_from) = page.end else {
+                break;
+            };
+            if from.as_deref() == Some(next_from.as_str()) {
+                break;
+            }
+            from = Some(next_from);
+        }
+
+        events.sort_by_key(|event| event.origin_server_ts);
+        Ok(events)
+    }
+
+    pub async fn fetch_all_room_messages(&self, room_id: &str) -> Result<Vec<HistoryMessage>> {
+        Ok(self
+            .fetch_all_room_events(room_id, Some(vec!["m.room.message".to_owned()]))
+            .await?
+            .into_iter()
+            .filter_map(|event| {
+                let body = event
+                    .content
+                    .get("body")
+                    .and_then(serde_json::Value::as_str)?;
+                Some(HistoryMessage {
+                    sender: event.sender,
+                    body: body.to_owned(),
+                    origin_server_ts: event.origin_server_ts,
+                })
+            })
+            .collect())
+    }
+
+    pub async fn download_mxc(&self, mxc_url: &str, destination: &Path) -> Result<()> {
+        let url = mxc_http_url(&self.homeserver, mxc_url)?;
+        let response = self
+            .http
+            .get(url)
+            .bearer_auth(&self.token)
+            .send()
+            .await?
+            .error_for_status()
+            .context("downloading Matrix media")?;
+        let bytes = response.bytes().await.context("reading Matrix media")?;
+        tokio::fs::write(destination, bytes)
+            .await
+            .with_context(|| format!("writing {}", destination.display()))?;
+        Ok(())
+    }
+
+    pub fn homeserver(&self) -> &Url {
+        &self.homeserver
+    }
+
+    async fn fetch_room_messages(
+        &self,
+        room_id: &str,
+        from: Option<&str>,
+        limit: u32,
+        direction: &str,
+        filter: Option<&str>,
+    ) -> Result<MessagesResponse> {
+        let url = self.messages_url(room_id, from, limit, direction, filter)?;
+        Ok(self
+            .http
+            .get(url)
+            .bearer_auth(&self.token)
+            .send()
+            .await?
+            .error_for_status()
+            .with_context(|| format!("fetching Matrix history for room {room_id}"))?
+            .json()
+            .await?)
+    }
+
+    fn messages_url(
+        &self,
+        room_id: &str,
+        from: Option<&str>,
+        limit: u32,
+        direction: &str,
+        filter: Option<&str>,
+    ) -> Result<Url> {
+        let mut url = self.homeserver.join(&format!(
+            "/_matrix/client/v3/rooms/{}/messages",
+            url_escape(room_id)
+        ))?;
+        {
+            let mut query = url.query_pairs_mut();
+            query.append_pair("dir", direction);
+            query.append_pair("limit", &limit.to_string());
+            if let Some(filter) = filter {
+                query.append_pair("filter", filter);
+            }
+            if let Some(from) = from {
+                query.append_pair("from", from);
+            }
+        }
+        Ok(url)
     }
 
     pub async fn run<C>(&self, room_id: &str, prefix: &str, society: Arc<Society<C>>) -> Result<()>
@@ -397,6 +528,61 @@ fn strip_markdown(input: &str) -> String {
     out
 }
 
+#[derive(Debug, Clone)]
+pub struct RoomTimelineEvent {
+    pub event_id: String,
+    pub sender: String,
+    pub event_type: String,
+    pub origin_server_ts: u64,
+    pub content: serde_json::Value,
+}
+
+pub fn mxc_http_url(homeserver: &Url, mxc_url: &str) -> Result<Url> {
+    let rest = mxc_url
+        .strip_prefix("mxc://")
+        .with_context(|| format!("invalid mxc url {mxc_url}"))?;
+    let (server, media_id) = rest
+        .split_once('/')
+        .with_context(|| format!("invalid mxc url {mxc_url}"))?;
+    Ok(homeserver.join(&format!(
+        "/_matrix/media/v3/download/{}/{}",
+        url_escape(server),
+        url_escape(media_id)
+    ))?)
+}
+
+#[derive(Debug, Deserialize)]
+struct MessagesResponse {
+    chunk: Vec<RoomTimelineEventRaw>,
+    #[serde(default)]
+    start: String,
+    end: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RoomTimelineEventRaw {
+    event_id: String,
+    sender: String,
+    #[serde(rename = "type")]
+    event_type: String,
+    #[serde(default)]
+    origin_server_ts: u64,
+    #[serde(default)]
+    content: serde_json::Value,
+}
+
+impl From<RoomTimelineEventRaw> for RoomTimelineEvent {
+    fn from(value: RoomTimelineEventRaw) -> Self {
+        Self {
+            event_id: value.event_id,
+            sender: value.sender,
+            event_type: value.event_type,
+            origin_server_ts: value.origin_server_ts,
+            content: value.content,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct SyncResponse {
     next_batch: String,
@@ -611,6 +797,16 @@ mod tests {
         assert_eq!(
             payload["formatted_body"],
             "<strong>Head:</strong> <code>alice</code><br/>· item"
+        );
+    }
+
+    #[test]
+    fn builds_mxc_download_urls() {
+        let homeserver = Url::parse("https://matrix.example.org").unwrap();
+        let url = mxc_http_url(&homeserver, "mxc://parity.io/abc123").unwrap();
+        assert_eq!(
+            url.as_str(),
+            "https://matrix.example.org/_matrix/media/v3/download/parity.io/abc123"
         );
     }
 

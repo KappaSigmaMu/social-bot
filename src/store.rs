@@ -65,6 +65,14 @@ impl OverrideStore {
             Err(err) => Err(err.into()),
         }
     }
+
+    pub fn list_overrides(&self) -> Result<Vec<(String, String)>> {
+        let mut statement = self
+            .conn
+            .prepare("SELECT address, matrix_handle FROM accounts ORDER BY matrix_handle")?;
+        let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
 }
 
 #[cfg(test)]

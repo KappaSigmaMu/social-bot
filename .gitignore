@@ -1,1 +1,17 @@
+.DS_Store
 /target
+
+# Local env and runtime data
+.env
+society_overrides.db
+society_overrides*.db
+
+# Matrix room exports
+/room-export/
+/room-export.zip
+/exports/
+
+# Local Chopsticks state
+/db.sqlite
+/db.sqlite-shm
+/db.sqlite-wal

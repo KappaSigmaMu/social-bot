@@ -20,7 +20,7 @@ serde_json = "1"
 subxt = { version = "0.50", features = ["jsonrpsee"] }
 subxt-rpcs = "0.50"
 subxt-signer = "0.50"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "fs"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
