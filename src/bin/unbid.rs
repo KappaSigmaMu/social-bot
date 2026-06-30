@@ -1,6 +1,9 @@
 use anyhow::{Context, Result, anyhow};
 use std::env;
+use subxt::tx::DefaultParams;
 use subxt::{OnlineClient, PolkadotConfig, dynamic};
+use subxt_rpcs::RpcClient;
+use subxt_rpcs::client::rpc_params;
 use subxt_signer::sr25519::dev;
 
 const DEFAULT_RPC_URL: &str = "ws://127.0.0.1:8000";
@@ -9,6 +12,11 @@ const DEFAULT_SIGNER: &str = "dave";
 #[tokio::main]
 async fn main() -> Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
+    if args.iter().any(|arg| arg == "-h" || arg == "--help") {
+        print_help();
+        return Ok(());
+    }
+
     let rpc_url = args
         .first()
         .cloned()
@@ -22,26 +30,47 @@ async fn main() -> Result<()> {
 
     let signer = dev_account(&signer_name)?;
     let signer_label = signer_label(&signer_name);
-    let api = if rpc_url.starts_with("ws://") || rpc_url.starts_with("http://") {
-        OnlineClient::<PolkadotConfig>::from_insecure_url(&rpc_url).await
-    } else {
-        OnlineClient::<PolkadotConfig>::from_url(&rpc_url).await
-    }
-    .with_context(|| format!("connecting to Chopsticks RPC {rpc_url}"))?;
+    let api = connect_subxt(&rpc_url).await?;
+    let rpc = connect_rpc(&rpc_url).await?;
 
     let at_block = api.at_current_block().await?;
     let current_block = at_block.block_number();
     let tx_payload = dynamic::tx("Society", "unbid", Vec::<subxt::dynamic::Value>::new());
 
-    let _events = at_block
+    let tx = at_block
         .transactions()
-        .sign_and_submit_then_watch_default(&tx_payload, &signer)
-        .await?
-        .wait_for_finalized_success()
+        .create_signed(&tx_payload, &signer, DefaultParams::default_params())
         .await?;
+    let tx_hash: String = rpc
+        .request(
+            "author_submitExtrinsic",
+            rpc_params![format!("0x{}", hex::encode(tx.encoded()))],
+        )
+        .await
+        .context("submitting extrinsic through legacy author_submitExtrinsic")?;
 
-    println!("Submitted Society unbid at block {current_block} from {signer_label}");
+    println!(
+        "Submitted Society unbid transaction from {signer_label} at block {current_block}; tx hash: {tx_hash}"
+    );
     Ok(())
+}
+
+async fn connect_subxt(rpc_url: &str) -> Result<OnlineClient<PolkadotConfig>> {
+    if rpc_url.starts_with("ws://") || rpc_url.starts_with("http://") {
+        OnlineClient::<PolkadotConfig>::from_insecure_url(rpc_url).await
+    } else {
+        OnlineClient::<PolkadotConfig>::from_url(rpc_url).await
+    }
+    .with_context(|| format!("connecting to Chopsticks RPC {rpc_url}"))
+}
+
+async fn connect_rpc(rpc_url: &str) -> Result<RpcClient> {
+    if rpc_url.starts_with("ws://") || rpc_url.starts_with("http://") {
+        RpcClient::from_insecure_url(rpc_url).await
+    } else {
+        RpcClient::from_url(rpc_url).await
+    }
+    .with_context(|| format!("connecting legacy RPC client to {rpc_url}"))
 }
 
 fn dev_account(name: &str) -> Result<subxt_signer::sr25519::Keypair> {
@@ -68,4 +97,10 @@ fn signer_label(name: &str) -> &'static str {
         "ferdie" => "Ferdie",
         _ => "Unknown",
     }
+}
+
+fn print_help() {
+    println!(
+        "Usage: cargo society:unbid [rpc-url] [signer]\n\nDefaults:\n  rpc-url: {DEFAULT_RPC_URL}\n  signer: {DEFAULT_SIGNER}\n\nEnvironment overrides:\n  CHOPSTICKS_RPC_URL\n  CHOPSTICKS_BIDDER"
+    );
 }

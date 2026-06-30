@@ -7,9 +7,12 @@ use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use serde_json::Value as JsonValue;
 use std::sync::{Arc, Mutex};
+use subxt::backend::LegacyBackend;
 use subxt::dynamic::{Value, storage};
 use subxt::error::{Error as SubxtError, StorageError};
 use subxt::{OnlineClient, PolkadotConfig};
+use subxt_rpcs::RpcClient;
+use tracing::info;
 
 const KUSAMA_SS58_PREFIX: u16 = 2;
 
@@ -209,12 +212,17 @@ pub struct SubxtKusama {
 
 impl SubxtKusama {
     pub async fn connect(url: &str) -> Result<Self> {
-        let api = if url.starts_with("ws://") || url.starts_with("http://") {
-            OnlineClient::<PolkadotConfig>::from_insecure_url(url).await
+        let rpc_client = if url.starts_with("ws://") || url.starts_with("http://") {
+            RpcClient::from_insecure_url(url).await
         } else {
-            OnlineClient::<PolkadotConfig>::from_url(url).await
+            RpcClient::from_url(url).await
         }
         .with_context(|| format!("connecting to Kusama RPC {url}"))?;
+
+        let backend = LegacyBackend::<PolkadotConfig>::builder().build(rpc_client);
+        let api = OnlineClient::<PolkadotConfig>::from_backend(Arc::new(backend))
+            .await
+            .with_context(|| format!("initializing legacy RPC client for {url}"))?;
 
         Ok(Self { api })
     }
@@ -269,16 +277,27 @@ impl SubxtKusama {
         while let Some(block) = blocks.next().await {
             let block = block?;
             let block_number = block.number();
+            let block_hash = block.hash();
+            info!(block_number, ?block_hash, "received blockchain block");
             let at_block = block.at().await?;
             let events = at_block.events().fetch().await?;
             for event in events.iter() {
                 let event = event?;
-                if event.pallet_name() != "Society" {
-                    continue;
-                }
+                let pallet_name = event.pallet_name();
+                let event_name = event.event_name();
                 let values = event.decode_fields_unchecked_as::<Value>()?;
                 let json = value_to_json(values)?;
-                match event.event_name() {
+                info!(
+                    block_number,
+                    pallet = pallet_name,
+                    event = event_name,
+                    fields = %json,
+                    "received blockchain event"
+                );
+                if pallet_name != "Society" {
+                    continue;
+                }
+                match event_name {
                     "Bid" => {
                         let Some(account) = find_account_ids(&json).into_iter().next() else {
                             continue;
@@ -306,6 +325,40 @@ impl SubxtKusama {
             }
         }
         Ok(out)
+    }
+
+    pub async fn log_all_chain_activity(&self) -> Result<()> {
+        info!("starting raw blockchain observer");
+        let mut blocks = self.api.stream_best_blocks().await?;
+        while let Some(block) = blocks.next().await {
+            let block = block?;
+            let block_number = block.number();
+            let block_hash = block.hash();
+            info!(block_number, ?block_hash, "observed blockchain block");
+
+            let at_block = block.at().await?;
+            let events = at_block.events().fetch().await?;
+            if events.is_empty() {
+                info!(block_number, "observed block with no events");
+                continue;
+            }
+
+            for event in events.iter() {
+                let event = event?;
+                let pallet_name = event.pallet_name();
+                let event_name = event.event_name();
+                let values = event.decode_fields_unchecked_as::<Value>()?;
+                let json = value_to_json(values)?;
+                info!(
+                    block_number,
+                    pallet = pallet_name,
+                    event = event_name,
+                    fields = %json,
+                    "observed blockchain event"
+                );
+            }
+        }
+        Ok(())
     }
 }
 

@@ -1,0 +1,5 @@
+[alias]
+chopsticks = "run --bin cargo-chopsticks --"
+dev = "run -- --dev"
+"society:bid" = "run --bin submit_bid --"
+"society:unbid" = "run --bin unbid --"

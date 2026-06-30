@@ -29,8 +29,16 @@ async fn main() -> Result<()> {
 
     let store = OverrideStore::open(&config.db_path)?;
     let chain = SubxtKusama::connect(&config.rpc_url).await?;
+    tracing::info!(rpc_url = %config.rpc_url, "connected bot to blockchain RPC");
+    let log_chain = chain.clone();
     let event_chain = chain.clone();
     let society = Arc::new(Society::new(chain, store));
+
+    tokio::spawn(async move {
+        if let Err(err) = log_chain.log_all_chain_activity().await {
+            tracing::error!(?err, "raw blockchain observer stopped");
+        }
+    });
 
     let period_matrix = matrix.clone();
     let period_room = room_id.clone();

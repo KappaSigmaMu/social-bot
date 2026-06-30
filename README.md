@@ -19,7 +19,7 @@ The bot supports the original command set:
 - `!skeptic`
 
 It also polls the Kusama candidate period every 60 seconds and announces period transitions to the configured Matrix room.
-It also polls Society bids every 60 seconds and announces newly observed bids to the configured Matrix room.
+It subscribes to chain blocks, logs observed blocks/events, and announces Society `Bid` and `Unbid` events to the configured Matrix room.
 
 ## Configuration
 
@@ -32,7 +32,7 @@ cargo run
 To point the bot at local Chopsticks without editing `.env`, pass:
 
 ```sh
-cargo run -- --dev
+cargo dev
 ```
 
 To send one sample Matrix message to the configured room and exit:
@@ -146,10 +146,42 @@ docker compose -f tests/e2e/docker-compose.yml up --build --abort-on-container-e
 
 The default checked-in Chopsticks config is [tests/e2e/kusama.yml](/Users/laurogripa/code/kusama/element-bot/tests/e2e/kusama.yml), copied from `../kappasigmamu.github.io/config/kusama.yml`. That file targets Asset Hub.
 
-To run that exact copied config locally:
+To run that copied config locally with a pinned fork block and instant block building:
 
 ```sh
-make chopsticks
+cargo chopsticks
 ```
 
-The `submit_bid` helper does not work against this copied Asset Hub config; `society.bid` fails there with `System::CallFiltered`.
+To use a different fork block:
+
+```sh
+KUSAMA_BLOCK_NUMBER=<block-number> cargo chopsticks --clean
+```
+
+Chopsticks writes fetched storage and produced blocks to `db.sqlite`. `cargo chopsticks` resumes from that DB by default because it is the fastest local restart path.
+
+To force a fresh local state:
+
+```sh
+cargo chopsticks --clean
+```
+
+Run the bot against local Chopsticks:
+
+```sh
+cargo dev
+```
+
+Submit a local bid or unbid:
+
+```sh
+cargo society:bid
+cargo society:unbid
+```
+
+The bot should log observed blocks/events and send Matrix messages like:
+
+- `Submitted Society bid at block X from Y for Z KSM`
+- `Submitted Society unbid at block X from Y`
+
+If Chopsticks logs `Method not found: transactionWatch_v1_submitAndWatch`, the caller is using an unsupported transaction-watch RPC. The local `submit_bid` and `unbid` helpers avoid that path and submit through the legacy-compatible extrinsic RPC.
