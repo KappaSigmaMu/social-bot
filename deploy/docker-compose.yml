@@ -1,6 +1,6 @@
 services:
   element-bot:
-    image: ghcr.io/kappasigmmu/element-bot:latest
+    image: ghcr.io/kappasigmamu/element-bot:latest
     restart: unless-stopped
     env_file: .env
     volumes:

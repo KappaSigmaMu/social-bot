@@ -1,5 +1,6 @@
 [alias]
 chopsticks = "run --bin cargo-chopsticks --"
+deploy = "run --bin deploy --"
 dev = "run -- --dev"
 export = "run --bin export --"
 seed = "run --bin seed --"

@@ -3,7 +3,7 @@
 Single-droplet deployment using Docker Compose and images built by GitHub Actions to GHCR.
 
 ```
-Push to main → GitHub Actions → ghcr.io/kappasigmmu/element-bot:latest
+Push to main → GitHub Actions → ghcr.io/kappasigmamu/element-bot:latest
                                       ↓
                               docker compose pull (on droplet)
 ```
@@ -49,7 +49,18 @@ sudo chown -R $USER:$USER /opt/element-bot
 cd /opt/element-bot
 ```
 
-Copy [`docker-compose.yml`](docker-compose.yml) to `/opt/element-bot/` (from this repo's `deploy/` directory).
+Copy deploy files from your laptop:
+
+```bash
+scp deploy/docker-compose.yml deploy/.env.example root@YOUR_DROPLET:/opt/element-bot/
+```
+
+If you have an existing override database locally, copy it too:
+
+```bash
+scp society_overrides.db root@YOUR_DROPLET:/opt/element-bot/data/society_overrides.db
+ssh root@YOUR_DROPLET 'chown 1000:1000 /opt/element-bot/data/society_overrides.db'
+```
 
 Create `.env` from the template:
 
@@ -79,7 +90,7 @@ chown -R 1000:1000 data
 
 ### 5. Authenticate to GHCR
 
-The image is published to `ghcr.io/kappasigmmu/element-bot`. Create a GitHub personal access token with `read:packages` scope, then:
+The image is published to `ghcr.io/kappasigmamu/element-bot`. Create a GitHub personal access token with `read:packages` scope, then:
 
 ```bash
 echo $GITHUB_PAT | docker login ghcr.io -u YOUR_GITHUB_USER --password-stdin
@@ -107,7 +118,22 @@ Send `!ping` in the Matrix room to confirm the bot is live.
 
 ## Updates
 
-After each merge to `main`, GitHub Actions rebuilds and pushes `:latest`. To deploy:
+After each merge to `main`, GitHub Actions rebuilds and pushes `:latest`. To deploy from your laptop:
+
+```bash
+cargo deploy
+```
+
+Add to your local `.env`:
+
+```env
+DEPLOY_HOST=root@your-droplet-ip
+# DEPLOY_DIR=/opt/element-bot   # optional, this is the default
+```
+
+This SSHes into the droplet and runs `docker compose pull && docker compose up -d`.
+
+Or manually on the droplet:
 
 ```bash
 cd /opt/element-bot
@@ -154,7 +180,7 @@ chown -R 1000:1000 /opt/element-bot/data
 
 **Image pull fails**
 
-Confirm GitHub Actions completed on `main` and the package exists at `ghcr.io/kappasigmmu/element-bot`. Re-run `docker login ghcr.io` if the PAT expired.
+Confirm GitHub Actions completed on `main` and the package exists at `ghcr.io/kappasigmamu/element-bot`. Re-run `docker login ghcr.io` if the PAT expired.
 
 **Bot does not respond**
 
