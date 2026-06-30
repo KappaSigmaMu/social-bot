@@ -55,6 +55,12 @@ Optional:
 - `PREFIX`: defaults to `!`.
 - `RUST_LOG`: tracing filter, for example `info` or `element_bot=debug`.
 
+## Production deployment
+
+The bot runs on a single DigitalOcean droplet via Docker Compose. Images are built in CI and pushed to GHCR on every merge to `main`.
+
+See [deploy/README.md](deploy/README.md) for droplet bootstrap, firewall, updates, and backups.
+
 ## Manual Testing
 
 Use this when you want to validate the bot against a real Matrix homeserver and live Kusama data instead of the Docker e2e harness.
