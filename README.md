@@ -175,11 +175,39 @@ To force a fresh local state:
 cargo chopsticks --clean
 ```
 
+Use `--custom` with either command to enable the custom runtime WASM override.
+
 Run the bot against local Chopsticks:
 
 ```sh
 cargo dev
 ```
+
+### Custom Society runtime
+
+The repo includes [custom-kusama-runtime](https://github.com/KappaSigmaMu/custom-kusama-runtime) as a submodule on branch `customized-society-pallet`. It shortens Society rotation periods for local testing.
+
+Initialize the submodule once:
+
+```sh
+git submodule update --init --recursive
+```
+
+Run Chopsticks with the custom runtime WASM override:
+
+```sh
+cargo chopsticks --custom
+```
+
+If `./custom-kusama-runtime.wasm` is missing, this builds `relay/kusama` inside the submodule and copies the WASM blob to the repo root (first build can take several minutes).
+
+Or start Chopsticks and the bot together:
+
+```sh
+cargo dev --custom
+```
+
+This builds the WASM when needed, starts Chopsticks with `wasm-override: ./custom-kusama-runtime.wasm`, waits for `ws://127.0.0.1:8000`, then runs the bot in dev mode.
 
 Submit a local bid or unbid:
 

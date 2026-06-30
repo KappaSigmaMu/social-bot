@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use element_bot::custom_runtime::{apply_wasm_override, ensure_custom_runtime_wasm};
 use std::env;
 use std::fs;
 use std::path::PathBuf;
@@ -19,12 +20,15 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<()> {
-    let (clean, chopsticks_args) = parse_args(env::args().skip(1));
-    if clean {
+    let options = parse_args(env::args().skip(1));
+    if options.clean {
         clean_db()?;
     }
+    if options.custom {
+        ensure_custom_runtime_wasm()?;
+    }
 
-    let config_path = config_path(!clean)?;
+    let config_path = config_path(!options.clean, options.custom)?;
     let block = env::var("KUSAMA_BLOCK_NUMBER")
         .ok()
         .filter(|value| !value.is_empty())
@@ -35,7 +39,7 @@ fn run() -> Result<()> {
         .arg("--host=0.0.0.0")
         .arg("--port=8000")
         .arg("--build-block-mode=Instant")
-        .args(chopsticks_args)
+        .args(options.chopsticks_args)
         .env("KUSAMA_BLOCK_NUMBER", block)
         .status()
         .context("running Chopsticks through npx")?;
@@ -47,31 +51,48 @@ fn run() -> Result<()> {
     Ok(())
 }
 
-fn parse_args(args: impl IntoIterator<Item = String>) -> (bool, Vec<String>) {
+struct ChopsticksOptions {
+    clean: bool,
+    custom: bool,
+    chopsticks_args: Vec<String>,
+}
+
+fn parse_args(args: impl IntoIterator<Item = String>) -> ChopsticksOptions {
     let mut clean = false;
+    let mut custom = false;
     let mut chopsticks_args = Vec::new();
 
     for arg in args {
         match arg.as_str() {
             "--" => {}
             "--clean" => clean = true,
+            "--custom" => custom = true,
             _ => chopsticks_args.push(arg),
         }
     }
 
-    (clean, chopsticks_args)
+    ChopsticksOptions {
+        clean,
+        custom,
+        chopsticks_args,
+    }
 }
 
-fn config_path(resume: bool) -> Result<PathBuf> {
-    if !resume {
+fn config_path(resume: bool, custom: bool) -> Result<PathBuf> {
+    if !resume && !custom {
         return Ok(PathBuf::from(BASE_CONFIG));
     }
 
-    let config =
-        fs::read_to_string(BASE_CONFIG).with_context(|| format!("reading {BASE_CONFIG}"))?;
+    let mut config = fs::read_to_string(BASE_CONFIG).with_context(|| format!("reading {BASE_CONFIG}"))?;
+    if custom {
+        config = apply_wasm_override(&config);
+    }
+    if resume {
+        config.push_str("\nresume: true\n");
+    }
+
     let path = env::temp_dir().join(format!("element-bot-chopsticks-{}.yml", std::process::id()));
-    fs::write(&path, format!("{config}\nresume: true\n"))
-        .with_context(|| format!("writing {}", path.display()))?;
+    fs::write(&path, config).with_context(|| format!("writing {}", path.display()))?;
     Ok(path)
 }
 
@@ -92,25 +113,35 @@ mod tests {
 
     #[test]
     fn resumes_by_default() {
-        let (clean, args) = parse_args(Vec::<String>::new());
+        let options = parse_args(Vec::<String>::new());
 
-        assert!(!clean);
-        assert!(args.is_empty());
+        assert!(!options.clean);
+        assert!(!options.custom);
+        assert!(options.chopsticks_args.is_empty());
     }
 
     #[test]
     fn clean_disables_resume() {
-        let (clean, args) = parse_args(["--clean".to_owned()]);
+        let options = parse_args(["--clean".to_owned()]);
 
-        assert!(clean);
-        assert!(args.is_empty());
+        assert!(options.clean);
+        assert!(!options.custom);
+        assert!(options.chopsticks_args.is_empty());
+    }
+
+    #[test]
+    fn enables_custom_runtime() {
+        let options = parse_args(["--custom".to_owned()]);
+
+        assert!(options.custom);
+        assert!(!options.clean);
     }
 
     #[test]
     fn forwards_extra_args_and_ignores_separator() {
-        let (clean, args) = parse_args(["--".to_owned(), "--rpc-timeout=120000".to_owned()]);
+        let options = parse_args(["--".to_owned(), "--rpc-timeout=120000".to_owned()]);
 
-        assert!(!clean);
-        assert_eq!(args, ["--rpc-timeout=120000"]);
+        assert!(!options.clean);
+        assert_eq!(options.chopsticks_args, ["--rpc-timeout=120000"]);
     }
 }

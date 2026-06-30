@@ -5,6 +5,7 @@
 .env
 society_overrides.db
 society_overrides*.db
+custom-kusama-runtime.wasm
 
 # Matrix room exports
 /room-export/

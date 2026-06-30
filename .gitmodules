@@ -1,0 +1,4 @@
+[submodule "custom-kusama-runtime"]
+	path = custom-kusama-runtime
+	url = https://github.com/KappaSigmaMu/custom-kusama-runtime.git
+	branch = customized-society-pallet
