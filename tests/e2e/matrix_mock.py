@@ -93,9 +93,11 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/_test/events":
             payload = self.read_json()
             with state_lock:
+                event_id = f"$cmd-{len(state['events'])}"
                 state["events"].append(
                     {
                         "type": "m.room.message",
+                        "event_id": event_id,
                         "sender": payload.get("sender", "@tester:e2e.local"),
                         "origin_server_ts": int(time.time() * 1000),
                         "content": {

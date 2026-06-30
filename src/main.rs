@@ -21,7 +21,7 @@ async fn main() -> Result<()> {
 
     if config.sample_mode {
         matrix
-            .send_message(&room_id, "Sample message from element-bot")
+            .send_message(&room_id, "Sample message from element-bot", None)
             .await?;
         return Ok(());
     }

@@ -37,7 +37,12 @@ impl MatrixClient {
         })
     }
 
-    pub async fn send_message(&self, room_id: &str, body: &str) -> Result<()> {
+    pub async fn send_message(
+        &self,
+        room_id: &str,
+        body: &str,
+        in_reply_to: Option<&str>,
+    ) -> Result<()> {
         let txn_id = format!(
             "{}",
             std::time::SystemTime::now()
@@ -48,7 +53,7 @@ impl MatrixClient {
         self.http
             .put(url)
             .bearer_auth(&self.token)
-            .json(&message_payload(body))
+            .json(&message_payload(body, in_reply_to))
             .send()
             .await?
             .error_for_status()
@@ -56,6 +61,7 @@ impl MatrixClient {
         info!(
             room_id,
             message = strip_markdown(body),
+            in_reply_to,
             "sent Matrix message"
         );
         Ok(())
@@ -291,7 +297,14 @@ impl MatrixClient {
                             .await
                             {
                                 Ok(Some(response)) => {
-                                    if let Err(err) = self.send_message(room_id, &response).await {
+                                    if let Err(err) = self
+                                        .send_message(
+                                            room_id,
+                                            &response,
+                                            event.event_id.as_deref(),
+                                        )
+                                        .await
+                                    {
                                         error!(?err, "failed to send Matrix response");
                                     }
                                 }
@@ -299,7 +312,11 @@ impl MatrixClient {
                                 Err(err) => {
                                     error!(?err, "command failed");
                                     let _ = self
-                                        .send_message(room_id, &format!("Error: {err:#}"))
+                                        .send_message(
+                                            room_id,
+                                            &format!("Error: {err:#}"),
+                                            event.event_id.as_deref(),
+                                        )
                                         .await;
                                 }
                             }
@@ -329,7 +346,7 @@ impl MatrixClient {
                 Ok((period_kind, message)) => {
                     if let Some(last_period) = last_period
                         && last_period != period_kind
-                        && let Err(err) = self.send_message(&room_id, &message).await
+                        && let Err(err) = self.send_message(&room_id, &message, None).await
                     {
                         error!(?err, "failed to announce period change");
                     }
@@ -380,6 +397,7 @@ impl MatrixClient {
                                             bid_plancks,
                                         },
                                     ),
+                                    None,
                                 )
                                 .await?;
                         }
@@ -394,6 +412,7 @@ impl MatrixClient {
                                 .send_message(
                                     &room_id,
                                     &unbid_message(block_number, &address_or_handle),
+                                    None,
                                 )
                                 .await?;
                         }
@@ -447,13 +466,21 @@ fn parse_room_target(value: &str) -> Result<RoomTarget> {
     anyhow::bail!("MATRIX_ROOM must start with '!' for a room ID or '#' for a room alias");
 }
 
-fn message_payload(body: &str) -> serde_json::Value {
-    json!({
+fn message_payload(body: &str, in_reply_to: Option<&str>) -> serde_json::Value {
+    let mut payload = json!({
         "msgtype": "m.text",
         "body": strip_markdown(body),
         "format": "org.matrix.custom.html",
         "formatted_body": markdown_to_html(body),
-    })
+    });
+    if let Some(event_id) = in_reply_to {
+        payload["m.relates_to"] = json!({
+            "m.in_reply_to": {
+                "event_id": event_id,
+            }
+        });
+    }
+    payload
 }
 
 fn escape_html(text: &str) -> String {
@@ -620,6 +647,8 @@ struct Timeline {
 
 #[derive(Debug, Deserialize)]
 struct RoomEvent {
+    #[serde(default)]
+    event_id: Option<String>,
     sender: String,
     #[serde(default)]
     origin_server_ts: Option<u64>,
@@ -790,7 +819,7 @@ mod tests {
             "https://matrix.example/_matrix/client/v3/sync?timeout=30000&since=s0"
         );
         assert_eq!(
-            message_payload("hello"),
+            message_payload("hello", None),
             serde_json::json!({
                 "msgtype": "m.text",
                 "body": "hello",
@@ -798,11 +827,25 @@ mod tests {
                 "formatted_body": "hello",
             })
         );
-        let payload = message_payload("**Head:** `alice`\n· item");
+        let payload = message_payload("**Head:** `alice`\n· item", None);
         assert_eq!(payload["body"], "Head: alice\n· item");
         assert_eq!(
             payload["formatted_body"],
             "<strong>Head:</strong> <code>alice</code><br/>· item"
+        );
+        assert_eq!(
+            message_payload("Pong!", Some("$event123")),
+            serde_json::json!({
+                "msgtype": "m.text",
+                "body": "Pong!",
+                "format": "org.matrix.custom.html",
+                "formatted_body": "Pong!",
+                "m.relates_to": {
+                    "m.in_reply_to": {
+                        "event_id": "$event123",
+                    }
+                },
+            })
         );
     }
 
@@ -818,7 +861,7 @@ mod tests {
 
     #[test]
     fn escapes_html_in_matrix_messages() {
-        let payload = message_payload("**Alert** `<script>`");
+        let payload = message_payload("**Alert** `<script>`", None);
         assert_eq!(
             payload["formatted_body"],
             "<strong>Alert</strong> <code>&lt;script&gt;</code>"
