@@ -1,18 +1,16 @@
 use anyhow::{Context, Result};
 use element_bot::config::Config;
 use element_bot::matrix::MatrixClient;
+use element_bot::logging;
 use element_bot::room_archive::{ExportOptions, export_room_history, retry_failed_media};
 use std::env;
 use std::path::PathBuf;
-use tracing_subscriber::EnvFilter;
 
 const DEFAULT_ROOM: &str = "#kappasigmamulounge:parity.io";
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
-        .init();
+    let _log_guard = logging::init("export");
 
     let mut room = None;
     let mut homeserver = None;

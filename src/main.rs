@@ -4,14 +4,12 @@ use element_bot::config::Config;
 use element_bot::matrix::MatrixClient;
 use element_bot::models::SeenSocietyEvents;
 use element_bot::store::OverrideStore;
+use element_bot::logging;
 use std::sync::Arc;
-use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
-        .init();
+    let _log_guard = logging::init("element-bot");
 
     let config = Config::from_env()?;
     let matrix = MatrixClient::new(

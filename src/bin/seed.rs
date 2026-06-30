@@ -1,19 +1,17 @@
 use anyhow::{Context, Result};
 use element_bot::config::Config;
+use element_bot::logging;
 use element_bot::overrides_import::{HistoryMessage, replay_override_history};
 use element_bot::room_archive::load_history_messages;
 use element_bot::store::OverrideStore;
 use std::env;
 use std::path::PathBuf;
-use tracing_subscriber::EnvFilter;
 
 const DEFAULT_BOT_USER_ID: &str = "@societybot:matrix.org";
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
-        .init();
+    let _log_guard = logging::init("seed");
 
     let mut input_dir = None;
     let mut db_path = None;

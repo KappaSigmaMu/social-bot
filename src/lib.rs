@@ -1,6 +1,7 @@
 pub mod chain;
 pub mod commands;
 pub mod config;
+pub mod logging;
 pub mod matrix;
 pub mod messages;
 pub mod models;

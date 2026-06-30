@@ -275,6 +275,12 @@ impl MatrixClient {
                             let Some(body) = event.content.body.as_deref() else {
                                 continue;
                             };
+                            info!(
+                                room_id,
+                                sender = %event.sender,
+                                message = body,
+                                "received Matrix message"
+                            );
                             match handle_command(
                                 society.as_ref(),
                                 prefix,

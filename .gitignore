@@ -15,3 +15,6 @@ society_overrides*.db
 /db.sqlite
 /db.sqlite-shm
 /db.sqlite-wal
+
+# Runtime logs
+/logs/
