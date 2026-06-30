@@ -35,6 +35,7 @@ pub trait ChainData: Send + Sync {
     async fn candidate_skeptic(&self) -> Result<Option<String>>;
     async fn founder(&self) -> Result<Option<String>>;
     async fn block_number(&self) -> Result<u64>;
+    async fn next_intake_at(&self) -> Result<Option<u64>>;
     async fn identity_matrix_handle(&self, address: &str) -> Result<Option<String>>;
 }
 
@@ -165,6 +166,16 @@ where
 
     pub async fn get_block_number(&self) -> Result<u64> {
         self.chain.block_number().await
+    }
+
+    pub async fn get_intake_countdown(&self) -> Result<(u64, u64)> {
+        let current_block = self.chain.block_number().await?;
+        let next_intake_at = self
+            .chain
+            .next_intake_at()
+            .await?
+            .ok_or_else(|| anyhow!("NextIntakeAt is unavailable on chain"))?;
+        Ok((current_block, next_intake_at))
     }
 
     pub async fn get_head_address(&self) -> Result<Option<String>> {
@@ -513,6 +524,14 @@ impl ChainData for SubxtKusama {
             .unwrap_or_default() as u64)
     }
 
+    async fn next_intake_at(&self) -> Result<Option<u64>> {
+        Ok(self
+            .fetch("Society", "NextIntakeAt")
+            .await?
+            .and_then(|value| value.as_u128())
+            .and_then(|value| u64::try_from(value).ok()))
+    }
+
     async fn identity_matrix_handle(&self, address: &str) -> Result<Option<String>> {
         let value = match self.fetch_keyed("Identity", "IdentityOf", address).await {
             Ok(value) => value,
@@ -709,6 +728,7 @@ pub mod tests {
         pub head: Option<String>,
         pub candidate_skeptic: Option<String>,
         pub block_number: u64,
+        pub next_intake_at: Option<u64>,
         pub identities: HashMap<String, String>,
     }
 
@@ -759,6 +779,10 @@ pub mod tests {
 
         async fn block_number(&self) -> Result<u64> {
             Ok(self.block_number)
+        }
+
+        async fn next_intake_at(&self) -> Result<Option<u64>> {
+            Ok(self.next_intake_at)
         }
 
         async fn identity_matrix_handle(&self, address: &str) -> Result<Option<String>> {

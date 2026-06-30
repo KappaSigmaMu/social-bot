@@ -120,6 +120,11 @@ def main():
             contains_all("No candidate matching", KNOWN_KUSAMA_ADDRESS),
         ),
         (
+            "intake countdown through Chopsticks",
+            "!countdown",
+            lambda body: body.startswith("Next intake in") and "at block" in body,
+        ),
+        (
             "member info through Chopsticks",
             f"!info {KNOWN_KUSAMA_ADDRESS}",
             contains_all("Member", "· Address:"),

@@ -15,6 +15,7 @@ The bot supports the original command set:
 - `!unset_address`
 - `!me`
 - `!period`
+- `!countdown`
 - `!skeptics`
 - `!skeptic`
 

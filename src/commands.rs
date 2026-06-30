@@ -1,7 +1,7 @@
 use crate::chain::{ChainData, Society};
 use crate::messages::{
     candidate_not_found_message, candidates_message, defender_message, head_message,
-    member_info_message, period_message, skeptics_message,
+    intake_countdown_message, member_info_message, period_message, skeptics_message,
 };
 use anyhow::Result;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -91,6 +91,11 @@ where
                 candidate_skeptic.as_deref(),
                 false,
             )
+        }
+        "countdown" => {
+            let (current_block, next_intake_at) = society.get_intake_countdown().await?;
+            let blocks_remaining = next_intake_at.saturating_sub(current_block);
+            intake_countdown_message(blocks_remaining, next_intake_at)
         }
         "skeptics" | "skeptic" => {
             let defender = society.get_defending().await?;
@@ -283,6 +288,7 @@ mod tests {
         chain.head = Some(MEMBER.to_owned());
         chain.founder = Some(MEMBER.to_owned());
         chain.block_number = 1;
+        chain.next_intake_at = Some(1_005);
         chain.strikes.insert(MEMBER.to_owned(), 5);
         chain
             .identities
@@ -328,6 +334,13 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .contains("**Voting**")
+        );
+        assert!(
+            handle_command(&society, "!", "@testuser:matrix.org", "!countdown", None)
+                .await
+                .unwrap()
+                .unwrap()
+                .contains("Next intake in")
         );
         assert!(
             handle_command(&society, "!", "@testuser:matrix.org", "!skeptics", None)

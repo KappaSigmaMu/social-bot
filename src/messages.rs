@@ -117,6 +117,43 @@ pub fn member_info_message(info: &MemberInfo, include_handle: bool) -> String {
     lines.join("\n")
 }
 
+pub fn intake_countdown_message(blocks_remaining: u64, next_intake_at: u64) -> String {
+    if blocks_remaining == 0 {
+        return format!("Next intake is due now (at block {next_intake_at})");
+    }
+
+    let duration =
+        Duration::from_secs(blocks_remaining * CandidatePeriod::SECONDS_PER_BLOCK);
+    format!(
+        "Next intake in {} (at block {next_intake_at})",
+        format_readable_countdown(duration)
+    )
+}
+
+pub fn format_readable_countdown(duration: Duration) -> String {
+    let total = duration.as_secs();
+    let days = total / 86_400;
+    let hours = total % 86_400 / 3_600;
+    let minutes = total % 3_600 / 60;
+    let seconds = total % 60;
+
+    format!(
+        "{}, {}, {} and {}",
+        format_countdown_component(days, "day"),
+        format_countdown_component(hours, "hour"),
+        format_countdown_component(minutes, "minute"),
+        format_countdown_component(seconds, "second"),
+    )
+}
+
+fn format_countdown_component(value: u64, singular: &str) -> String {
+    if value == 1 {
+        format!("1 {singular}")
+    } else {
+        format!("{value} {singular}s")
+    }
+}
+
 pub fn skeptics_message(defender_skeptic: Option<&str>, candidate_skeptic: Option<&str>) -> String {
     format!(
         "**Defender skeptic:** {}\n**Candidate skeptic:** {}",
@@ -312,6 +349,30 @@ mod tests {
         assert!(message.contains("**Defender:** none"));
         assert!(message.contains("8 approvals · 6 rejections"));
         assert!(message.contains("**Candidate skeptic:** none"));
+    }
+
+    #[test]
+    fn renders_readable_countdown() {
+        assert_eq!(
+            format_readable_countdown(Duration::from_secs(90_061)),
+            "1 day, 1 hour, 1 minute and 1 second"
+        );
+        assert_eq!(
+            format_readable_countdown(Duration::from_secs(0)),
+            "0 days, 0 hours, 0 minutes and 0 seconds"
+        );
+    }
+
+    #[test]
+    fn renders_intake_countdown_message() {
+        assert_eq!(
+            intake_countdown_message(0, 1_234_567),
+            "Next intake is due now (at block 1234567)"
+        );
+        assert_eq!(
+            intake_countdown_message(10, 1_234_567),
+            "Next intake in 0 days, 0 hours, 1 minute and 0 seconds (at block 1234567)"
+        );
     }
 
     #[test]

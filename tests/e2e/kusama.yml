@@ -118,6 +118,7 @@ import-storage:
           index: 1
     ChallengeRoundCount: 6
     RoundCount: 6
+    NextIntakeAt: 18500000
     MemberCount: 2
     Head: 5HGjWAeFDfFCWPsjFQdVV2Msvz2XtMktvgocEZcCj68kUMaw # Eve
     Pot: '50000000000000'
