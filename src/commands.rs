@@ -52,7 +52,7 @@ where
                 candidates_message(&candidates)
             }
         }
-        "head" => head_message(society.get_head_address().await?.as_deref()),
+        "head" => head_message(society.get_head_display().await?.as_deref()),
         "set_address" => {
             let Some(address) = parts.next() else {
                 return Ok(Some("Usage: `!set_address <address>`".to_owned()));
@@ -81,7 +81,7 @@ where
             let period = society.get_candidate_period().await?;
             let defender = society.get_defending().await?;
             let candidates = society.get_candidates().await?;
-            let head = society.get_head_address().await?;
+            let head = society.get_head_display().await?;
             let candidate_skeptic = society.get_candidate_skeptic().await?;
             period_message(
                 &period,
@@ -307,7 +307,7 @@ mod tests {
                 .await
                 .unwrap()
                 .unwrap(),
-            format!("**Head:** `{MEMBER}`")
+            format!("**Head:** `{MEMBER} (@member:matrix.org)`")
         );
         assert!(
             handle_command(

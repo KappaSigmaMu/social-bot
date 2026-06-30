@@ -358,10 +358,8 @@ impl MatrixClient {
                             bid_plancks,
                             ..
                         } => {
-                            let address_or_handle = society
-                                .get_matrix_handle(&address)
-                                .await?
-                                .unwrap_or(address);
+                            let address_or_handle =
+                                society.format_account_display(&address).await?;
                             matrix
                                 .send_message(
                                     &room_id,
@@ -380,10 +378,8 @@ impl MatrixClient {
                             address,
                             ..
                         } => {
-                            let address_or_handle = society
-                                .get_matrix_handle(&address)
-                                .await?
-                                .unwrap_or(address);
+                            let address_or_handle =
+                                society.format_account_display(&address).await?;
                             matrix
                                 .send_message(
                                     &room_id,
@@ -406,7 +402,7 @@ where
     let period = society.get_candidate_period().await?;
     let defender = society.get_defending().await?;
     let candidates = society.get_candidates().await?;
-    let head = society.get_head_address().await?;
+    let head = society.get_head_display().await?;
     let candidate_skeptic = society.get_candidate_skeptic().await?;
     let message = period_message(
         &period,

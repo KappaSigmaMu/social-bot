@@ -1,3 +1,4 @@
+use crate::messages::format_address_with_handle;
 use crate::models::{
     Bid, Candidate, CandidatePeriod, Defender, MemberInfo, MemberState, SocietyEvent,
     SocietyEventId, SocietyEventKind, Tally,
@@ -86,12 +87,19 @@ where
             .address_for_matrix_handle(matrix_handle)
     }
 
+    pub async fn format_account_display(&self, address: &str) -> Result<String> {
+        Ok(format_address_with_handle(
+            address,
+            self.get_matrix_handle(address).await?.as_deref(),
+        ))
+    }
+
     pub async fn get_candidates(&self) -> Result<Vec<Candidate>> {
         let mut candidates = self.chain.candidates_raw().await?;
         for candidate in &mut candidates {
-            if let Some(handle) = self.get_matrix_handle(&candidate.address_or_handle).await? {
-                candidate.address_or_handle = handle;
-            }
+            candidate.address_or_handle = self
+                .format_account_display(&candidate.address_or_handle)
+                .await?;
         }
         Ok(candidates)
     }
@@ -99,9 +107,7 @@ where
     pub async fn get_bids(&self) -> Result<Vec<Bid>> {
         let mut bids = self.chain.bids_raw().await?;
         for bid in &mut bids {
-            if let Some(handle) = self.get_matrix_handle(&bid.address_or_handle).await? {
-                bid.address_or_handle = handle;
-            }
+            bid.address_or_handle = self.format_account_display(&bid.address_or_handle).await?;
         }
         Ok(bids)
     }
@@ -109,14 +115,11 @@ where
     pub async fn get_defending(&self) -> Result<Defender> {
         let mut defender = self.chain.defending_raw().await?;
         if let Some(address) = defender.address_or_handle.clone() {
-            if let Some(handle) = self.get_matrix_handle(&address).await? {
-                defender.address_or_handle = Some(handle);
-            }
+            defender.address_or_handle =
+                Some(self.format_account_display(&address).await?);
         }
         if let Some(address) = defender.skeptic.clone() {
-            if let Some(handle) = self.get_matrix_handle(&address).await? {
-                defender.skeptic = Some(handle);
-            }
+            defender.skeptic = Some(self.format_account_display(&address).await?);
         }
         Ok(defender)
     }
@@ -125,7 +128,7 @@ where
         let Some(skeptic) = self.chain.candidate_skeptic().await? else {
             return Ok(None);
         };
-        Ok(self.get_matrix_handle(&skeptic).await?.or(Some(skeptic)))
+        Ok(Some(self.format_account_display(&skeptic).await?))
     }
 
     pub async fn get_member_state(&self, address: &str) -> Result<MemberState> {
@@ -163,6 +166,13 @@ where
 
     pub async fn get_head_address(&self) -> Result<Option<String>> {
         self.chain.head_address().await
+    }
+
+    pub async fn get_head_display(&self) -> Result<Option<String>> {
+        match self.chain.head_address().await? {
+            Some(address) => Ok(Some(self.format_account_display(&address).await?)),
+            None => Ok(None),
+        }
     }
 
     async fn is_member(&self, address: &str) -> Result<bool> {
@@ -772,16 +782,17 @@ pub mod tests {
             society.get_matrix_handle(MEMBER).await.unwrap().as_deref(),
             Some("@override:matrix.org")
         );
+        let expected = format!("{MEMBER} (@override:matrix.org)");
         assert_eq!(
             society.get_bids().await.unwrap(),
             vec![Bid {
-                address_or_handle: "@override:matrix.org".to_owned(),
+                address_or_handle: expected.clone(),
                 bid_plancks: 123,
             }]
         );
         assert_eq!(
             society.get_candidate_skeptic().await.unwrap().as_deref(),
-            Some("@override:matrix.org")
+            Some(expected.as_str())
         );
         assert_eq!(
             society
@@ -790,11 +801,11 @@ pub mod tests {
                 .unwrap()
                 .address_or_handle
                 .as_deref(),
-            Some("@override:matrix.org")
+            Some(expected.as_str())
         );
         assert_eq!(
             society.get_defending().await.unwrap().skeptic.as_deref(),
-            Some("@override:matrix.org")
+            Some(expected.as_str())
         );
     }
 

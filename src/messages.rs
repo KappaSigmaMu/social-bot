@@ -3,6 +3,13 @@ use std::time::Duration;
 
 const KSM_DIVISOR: u128 = 1_000_000_000_000;
 
+pub fn format_address_with_handle(address: &str, handle: Option<&str>) -> String {
+    match handle {
+        Some(handle) if handle != address => format!("{address} ({handle})"),
+        _ => address.to_owned(),
+    }
+}
+
 pub fn candidates_message(candidates: &[Candidate]) -> String {
     let mut message = String::from("**Candidates**\n");
     match candidates {
@@ -92,10 +99,9 @@ pub fn head_message(head: Option<&str>) -> String {
 
 pub fn member_info_message(info: &MemberInfo) -> String {
     format!(
-        "**Member**\n· Address: `{}`\n· State: {}\n· Element: {}\n· Strikes: {}\n· Roles: {}",
-        info.address,
+        "**Member**\n· Address: `{}`\n· State: {}\n· Strikes: {}\n· Roles: {}",
+        format_address_with_handle(&info.address, info.element_handle.as_deref()),
         info.state,
-        format_account(info.element_handle.as_deref()),
         info.strikes,
         format_roles(info.is_founder, info.is_defender),
     )
@@ -299,6 +305,16 @@ mod tests {
     }
 
     #[test]
+    fn format_address_with_handle_shows_handle_in_parentheses() {
+        assert_eq!(
+            format_address_with_handle("addr", Some("@user:matrix.org")),
+            "addr (@user:matrix.org)"
+        );
+        assert_eq!(format_address_with_handle("addr", None), "addr");
+        assert_eq!(format_address_with_handle("addr", Some("addr")), "addr");
+    }
+
+    #[test]
     fn renders_member_info_and_roles() {
         let message = member_info_message(&MemberInfo {
             address: "addr".to_owned(),
@@ -310,6 +326,7 @@ mod tests {
         });
 
         assert!(message.contains("**Member**"));
+        assert!(message.contains("· Address: `addr (@member:matrix.org)`"));
         assert!(message.contains("· State: member"));
         assert!(message.contains("· Roles: founder"));
     }

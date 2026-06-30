@@ -212,13 +212,13 @@ Retry only missing media from a previous export:
 cargo export --retry-failed --output ./exports/kappasigmamulounge
 ```
 
-**2. Seed** — replays `!set_address` / `!unset_address` from `events.jsonl` into the override database:
+**2. Seed** — replays `!set_address`, `!unset_address`, and bot `!me` responses from `events.jsonl` into the override database:
 
 ```sh
 cargo seed --input ./exports/kappasigmamulounge --dry-run
 cargo seed --input ./exports/kappasigmamulounge --db-path ./society_overrides.db
 ```
 
-`cargo seed` reads the export on disk only; it does not call Matrix. Set `MATRIX_USER_ID` in `.env` to the bot account whose messages should be skipped. `--input` defaults to `./room-export`.
+`cargo seed` reads the export on disk only; it does not call Matrix. It defaults to `@societybot:matrix.org` for matching bot messages in the export. `--input` defaults to `./room-export`.
 
 Requires a Matrix token and room access for `cargo export` only.
