@@ -36,10 +36,9 @@ pub fn replay_override_history(
     let mut pending_me = VecDeque::<(String, u64)>::new();
 
     for message in ordered {
-        while pending_me
-            .front()
-            .is_some_and(|(_, me_ts)| message.origin_server_ts.saturating_sub(*me_ts) > ME_RESPONSE_WINDOW_MS)
-        {
+        while pending_me.front().is_some_and(|(_, me_ts)| {
+            message.origin_server_ts.saturating_sub(*me_ts) > ME_RESPONSE_WINDOW_MS
+        }) {
             pending_me.pop_front();
         }
 
@@ -153,10 +152,8 @@ fn parse_member_override_from_response(body: &str) -> Option<(String, String)> {
             Some(parse_field_value(rest))
         } else if let Some(rest) = line.strip_prefix("· Element:") {
             Some(parse_field_value(rest))
-        } else if let Some(rest) = line.strip_prefix("Element:") {
-            Some(parse_field_value(rest))
         } else {
-            None
+            line.strip_prefix("Element:").map(parse_field_value)
         };
 
         if let Some(value) = value {
@@ -290,10 +287,7 @@ mod tests {
             split_address_and_handle(&format!("{MEMBER} ({USER})")),
             (MEMBER.to_owned(), Some(USER.to_owned()))
         );
-        assert_eq!(
-            split_address_and_handle(MEMBER),
-            (MEMBER.to_owned(), None)
-        );
+        assert_eq!(split_address_and_handle(MEMBER), (MEMBER.to_owned(), None));
     }
 
     #[test]
@@ -304,17 +298,14 @@ mod tests {
             Some((USER.to_owned(), MEMBER.to_owned()))
         );
 
-        let new = format!(
-            "**Member**\n· Address: `{MEMBER} ({USER})`\n· Status: member\n· Strikes: 0"
-        );
+        let new =
+            format!("**Member**\n· Address: `{MEMBER} ({USER})`\n· Status: member\n· Strikes: 0");
         assert_eq!(
             parse_member_override_from_response(&new),
             Some((USER.to_owned(), MEMBER.to_owned()))
         );
         assert_eq!(
-            parse_member_override_from_response(
-                "* **Address**: abc\n* **Element_handle**: None\n"
-            ),
+            parse_member_override_from_response("* **Address**: abc\n* **Element_handle**: None\n"),
             None
         );
     }

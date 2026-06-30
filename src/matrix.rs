@@ -327,12 +327,11 @@ impl MatrixClient {
         loop {
             match period_snapshot(society.as_ref()).await {
                 Ok((period_kind, message)) => {
-                    if let Some(last_period) = last_period {
-                        if last_period != period_kind {
-                            if let Err(err) = self.send_message(&room_id, &message).await {
-                                error!(?err, "failed to announce period change");
-                            }
-                        }
+                    if let Some(last_period) = last_period
+                        && last_period != period_kind
+                        && let Err(err) = self.send_message(&room_id, &message).await
+                    {
+                        error!(?err, "failed to announce period change");
                     }
                     last_period = Some(period_kind);
                 }
@@ -561,8 +560,8 @@ pub fn mxc_http_url(homeserver: &Url, mxc_url: &str) -> Result<Url> {
 #[derive(Debug, Deserialize)]
 struct MessagesResponse {
     chunk: Vec<RoomTimelineEventRaw>,
-    #[serde(default)]
-    start: String,
+    #[serde(default, rename = "start")]
+    _start: String,
     end: Option<String>,
 }
 

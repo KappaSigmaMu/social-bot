@@ -175,7 +175,7 @@ pub async fn retry_failed_media(client: &MatrixClient, output_dir: &Path) -> Res
         }
 
         retried += 1;
-        match download_exported_media(client, output_dir, &media_dir, event).await {
+        match download_exported_media(client, &media_dir, event).await {
             Ok(()) => stats.media_downloaded += 1,
             Err(err) => {
                 stats.media_failed += 1;
@@ -245,7 +245,6 @@ fn media_is_present(output_dir: &Path, event: &ExportedEvent) -> bool {
 
 async fn download_exported_media(
     client: &MatrixClient,
-    output_dir: &Path,
     media_dir: &Path,
     event: &mut ExportedEvent,
 ) -> Result<()> {

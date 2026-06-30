@@ -1,10 +1,10 @@
 use anyhow::Result;
 use element_bot::chain::{Society, SubxtKusama};
 use element_bot::config::Config;
+use element_bot::logging;
 use element_bot::matrix::MatrixClient;
 use element_bot::models::SeenSocietyEvents;
 use element_bot::store::OverrideStore;
-use element_bot::logging;
 use std::sync::Arc;
 
 #[tokio::main]

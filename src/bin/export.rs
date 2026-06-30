@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use element_bot::config::Config;
-use element_bot::matrix::MatrixClient;
 use element_bot::logging;
+use element_bot::matrix::MatrixClient;
 use element_bot::room_archive::{ExportOptions, export_room_history, retry_failed_media};
 use std::env;
 use std::path::PathBuf;

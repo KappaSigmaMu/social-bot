@@ -54,8 +54,7 @@ async fn main() -> Result<()> {
 
     if dry_run {
         let store = OverrideStore::open(":memory:")?;
-        let stats =
-            replay_override_history(&store, &config.prefix, &bot_user_id, &messages)?;
+        let stats = replay_override_history(&store, &config.prefix, &bot_user_id, &messages)?;
         print_stats(&stats, true);
         for (address, matrix_handle) in store.list_overrides()? {
             tracing::info!(%address, %matrix_handle, "would seed override");

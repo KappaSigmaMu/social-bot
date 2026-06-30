@@ -119,8 +119,7 @@ where
     pub async fn get_defending(&self) -> Result<Defender> {
         let mut defender = self.chain.defending_raw().await?;
         if let Some(address) = defender.address_or_handle.clone() {
-            defender.address_or_handle =
-                Some(self.format_account_display(&address).await?);
+            defender.address_or_handle = Some(self.format_account_display(&address).await?);
         }
         if let Some(address) = defender.skeptic.clone() {
             defender.skeptic = Some(self.format_account_display(&address).await?);

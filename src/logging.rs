@@ -13,7 +13,8 @@ pub fn init(service: &str) -> WorkerGuard {
     fs::create_dir_all(LOG_DIR).expect("creating logs directory");
 
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    let file_appender = RollingFileAppender::new(Rotation::DAILY, LOG_DIR, format!("{service}.log"));
+    let file_appender =
+        RollingFileAppender::new(Rotation::DAILY, LOG_DIR, format!("{service}.log"));
     let (file_writer, guard) = tracing_appender::non_blocking(file_appender);
 
     tracing_subscriber::registry()
