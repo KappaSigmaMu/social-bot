@@ -1,9 +1,18 @@
-FROM rust:1.90-bookworm AS builder
-
+FROM rust:1.90-bookworm AS chef
+RUN cargo install cargo-chef --locked
 WORKDIR /app
+
+FROM chef AS planner
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
-RUN cargo build --release --locked
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS builder
+COPY --from=planner /app/recipe.json recipe.json
+COPY Cargo.toml Cargo.lock ./
+RUN cargo chef cook --release --recipe-path recipe.json --bin element-bot
+COPY src ./src
+RUN cargo build --release --locked --bin element-bot
 
 FROM debian:bookworm-slim
 

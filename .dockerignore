@@ -1,5 +1,16 @@
 target/
 .git/
+.github/
 .env
 *.db
 *.sqlite
+*.sqlite-shm
+*.sqlite-wal
+logs/
+room-export/
+exports/
+tests/
+deploy/
+scripts/
+README.md
+**/.DS_Store
