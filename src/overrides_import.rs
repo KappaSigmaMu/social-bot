@@ -168,12 +168,27 @@ fn parse_member_override_from_response(body: &str) -> Option<(String, String)> {
         }
     }
 
-    let address = address?;
+    let mut address = address?;
+    if element.is_none() {
+        (address, element) = split_address_and_handle(&address);
+    }
     let element = element?;
     if element.eq_ignore_ascii_case("none") || !element.starts_with('@') {
         return None;
     }
     Some((element, address))
+}
+
+fn split_address_and_handle(value: &str) -> (String, Option<String>) {
+    let Some(open) = value.rfind(" (@") else {
+        return (value.to_owned(), None);
+    };
+    if !value.ends_with(')') {
+        return (value.to_owned(), None);
+    }
+    let address = value[..open].trim().to_owned();
+    let handle = value[open + 2..value.len() - 1].trim().to_owned();
+    (address, Some(handle))
 }
 
 fn parse_field_value(raw: &str) -> String {
@@ -270,6 +285,18 @@ mod tests {
     }
 
     #[test]
+    fn split_address_and_handle_extracts_matrix_id() {
+        assert_eq!(
+            split_address_and_handle(&format!("{MEMBER} ({USER})")),
+            (MEMBER.to_owned(), Some(USER.to_owned()))
+        );
+        assert_eq!(
+            split_address_and_handle(MEMBER),
+            (MEMBER.to_owned(), None)
+        );
+    }
+
+    #[test]
     fn parses_old_and_new_me_response_formats() {
         let old = me_response_body(USER, MEMBER);
         assert_eq!(
@@ -278,7 +305,7 @@ mod tests {
         );
 
         let new = format!(
-            "**Member**\n· Address: `{MEMBER}`\n· State: member\n· Element: {USER}\n· Strikes: 0\n· Roles: member"
+            "**Member**\n· Address: `{MEMBER} ({USER})`\n· Status: member\n· Strikes: 0"
         );
         assert_eq!(
             parse_member_override_from_response(&new),

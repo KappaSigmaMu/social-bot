@@ -158,7 +158,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert!(response.contains("· State: member"));
+        assert!(response.contains("· Status: member"));
     }
 
     #[tokio::test]

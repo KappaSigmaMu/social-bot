@@ -98,13 +98,21 @@ pub fn head_message(head: Option<&str>) -> String {
 }
 
 pub fn member_info_message(info: &MemberInfo) -> String {
-    format!(
-        "**Member**\n· Address: `{}`\n· State: {}\n· Strikes: {}\n· Roles: {}",
-        format_address_with_handle(&info.address, info.element_handle.as_deref()),
-        info.state,
-        info.strikes,
-        format_roles(info.is_founder, info.is_defender),
-    )
+    let mut lines = vec![
+        "**Member**".to_owned(),
+        format!(
+            "· Address: `{}`",
+            format_address_with_handle(&info.address, info.element_handle.as_deref())
+        ),
+        format!("· Status: {}", info.state),
+        format!("· Strikes: {}", info.strikes),
+    ];
+
+    if let Some(roles) = format_roles(info.is_founder, info.is_defender) {
+        lines.push(format!("· Roles: {roles}"));
+    }
+
+    lines.join("\n")
 }
 
 pub fn skeptics_message(defender_skeptic: Option<&str>, candidate_skeptic: Option<&str>) -> String {
@@ -148,7 +156,7 @@ fn format_account(account: Option<&str>) -> String {
     }
 }
 
-fn format_roles(is_founder: bool, is_defender: bool) -> String {
+fn format_roles(is_founder: bool, is_defender: bool) -> Option<String> {
     let mut roles = Vec::new();
     if is_founder {
         roles.push("founder");
@@ -157,9 +165,9 @@ fn format_roles(is_founder: bool, is_defender: bool) -> String {
         roles.push("defender");
     }
     if roles.is_empty() {
-        "none".to_owned()
+        None
     } else {
-        roles.join(", ")
+        Some(roles.join(", "))
     }
 }
 
@@ -327,7 +335,22 @@ mod tests {
 
         assert!(message.contains("**Member**"));
         assert!(message.contains("· Address: `addr (@member:matrix.org)`"));
-        assert!(message.contains("· State: member"));
+        assert!(message.contains("· Status: member"));
         assert!(message.contains("· Roles: founder"));
+    }
+
+    #[test]
+    fn omits_roles_when_none() {
+        let message = member_info_message(&MemberInfo {
+            address: "addr".to_owned(),
+            state: MemberState::Member,
+            element_handle: None,
+            strikes: 0,
+            is_founder: false,
+            is_defender: false,
+        });
+
+        assert!(message.contains("· Status: member"));
+        assert!(!message.contains("Roles"));
     }
 }
