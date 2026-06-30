@@ -161,7 +161,7 @@ where
 
     pub async fn get_candidate_period(&self) -> Result<CandidatePeriod> {
         Ok(CandidatePeriod::from_block(
-            self.chain.block_number().await?,
+            self.chain.relay_block_number().await?,
         ))
     }
 
@@ -934,7 +934,7 @@ pub mod tests {
     #[tokio::test]
     async fn society_calculates_candidate_period_from_chain_block() {
         let mut chain = FakeChain {
-            block_number: 72_001,
+            relay_block_number: 72_001,
             ..Default::default()
         };
         let society = Society::new(chain, test_store());
@@ -943,7 +943,7 @@ pub mod tests {
         assert_eq!(period.voting_blocks_left, 0);
 
         chain = FakeChain {
-            block_number: 100_799,
+            relay_block_number: 100_799,
             ..Default::default()
         };
         let society = Society::new(chain, test_store());
