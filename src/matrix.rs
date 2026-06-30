@@ -319,8 +319,8 @@ impl MatrixClient {
         &self,
         room_id: String,
         society: Arc<Society<C>>,
-    ) -> Result<()>
-    where
+        rpc_chain: SubxtKusama,
+    ) where
         C: ChainData + 'static,
     {
         let mut last_period: Option<CandidatePeriodKind> = None;
@@ -329,12 +329,17 @@ impl MatrixClient {
                 Ok((period_kind, message)) => {
                     if let Some(last_period) = last_period {
                         if last_period != period_kind {
-                            self.send_message(&room_id, &message).await?;
+                            if let Err(err) = self.send_message(&room_id, &message).await {
+                                error!(?err, "failed to announce period change");
+                            }
                         }
                     }
                     last_period = Some(period_kind);
                 }
-                Err(err) => error!(?err, "failed to poll candidate period"),
+                Err(err) => {
+                    error!(?err, "failed to poll candidate period; reconnecting RPC");
+                    rpc_chain.reconnect().await;
+                }
             }
             sleep(Duration::from_secs(60)).await;
         }
@@ -346,7 +351,7 @@ impl MatrixClient {
         society: Arc<Society<SubxtKusama>>,
         chain: SubxtKusama,
         seen_events: Arc<SeenSocietyEvents>,
-    ) -> Result<()> {
+    ) {
         chain
             .watch_society_events(|event| {
                 let room_id = room_id.clone();
@@ -397,7 +402,7 @@ impl MatrixClient {
                     Ok(())
                 }
             })
-            .await
+            .await;
     }
 }
 

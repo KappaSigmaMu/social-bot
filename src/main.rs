@@ -27,22 +27,19 @@ async fn main() -> Result<()> {
     }
 
     let store = OverrideStore::open(&config.db_path)?;
-    let chain = SubxtKusama::connect(&config.rpc_url).await?;
-    tracing::info!(rpc_url = %config.rpc_url, "connected bot to blockchain RPC");
+    let chain = SubxtKusama::connect_with_retry(&config.rpc_url).await;
     let seen_society_events = Arc::new(SeenSocietyEvents::new());
     let event_chain = chain.clone();
-    let society = Arc::new(Society::new(chain, store));
+    let society = Arc::new(Society::new(chain.clone(), store));
 
     let period_matrix = matrix.clone();
     let period_room = room_id.clone();
     let period_society = society.clone();
+    let period_chain = chain.clone();
     tokio::spawn(async move {
-        if let Err(err) = period_matrix
-            .announce_period_changes(period_room, period_society)
-            .await
-        {
-            tracing::error!(?err, "period announcer stopped");
-        }
+        period_matrix
+            .announce_period_changes(period_room, period_society, period_chain)
+            .await;
     });
 
     let events_matrix = matrix.clone();
@@ -50,12 +47,9 @@ async fn main() -> Result<()> {
     let events_society = society.clone();
     let events_seen = seen_society_events.clone();
     tokio::spawn(async move {
-        if let Err(err) = events_matrix
+        events_matrix
             .announce_society_events(events_room, events_society, event_chain, events_seen)
-            .await
-        {
-            tracing::error!(?err, "society event announcer stopped");
-        }
+            .await;
     });
 
     matrix.run(&room_id, &config.prefix, society).await

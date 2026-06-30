@@ -10,14 +10,18 @@ use async_trait::async_trait;
 use serde_json::Value as JsonValue;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use subxt::backend::LegacyBackend;
 use subxt::dynamic::{Value, storage};
 use subxt::error::{Error as SubxtError, StorageError};
 use subxt::{OnlineClient, PolkadotConfig};
 use subxt_rpcs::RpcClient;
-use tracing::info;
+use tokio::sync::RwLock;
+use tokio::time::sleep;
+use tracing::{error, info, warn};
 
 const KUSAMA_SS58_PREFIX: u16 = 2;
+const RPC_RETRY_DELAY: Duration = Duration::from_secs(5);
 
 #[async_trait]
 pub trait ChainData: Send + Sync {
@@ -219,11 +223,16 @@ where
 
 #[derive(Clone)]
 pub struct SubxtKusama {
-    api: OnlineClient<PolkadotConfig>,
+    rpc_url: String,
+    api: Arc<RwLock<OnlineClient<PolkadotConfig>>>,
 }
 
 impl SubxtKusama {
-    pub async fn connect(url: &str) -> Result<Self> {
+    pub fn rpc_url(&self) -> &str {
+        &self.rpc_url
+    }
+
+    async fn connect_client(url: &str) -> Result<OnlineClient<PolkadotConfig>> {
         let rpc_client = if url.starts_with("ws://") || url.starts_with("http://") {
             RpcClient::from_insecure_url(url).await
         } else {
@@ -232,17 +241,59 @@ impl SubxtKusama {
         .with_context(|| format!("connecting to Kusama RPC {url}"))?;
 
         let backend = LegacyBackend::<PolkadotConfig>::builder().build(rpc_client);
-        let api = OnlineClient::<PolkadotConfig>::from_backend(Arc::new(backend))
+        OnlineClient::<PolkadotConfig>::from_backend(Arc::new(backend))
             .await
-            .with_context(|| format!("initializing legacy RPC client for {url}"))?;
+            .with_context(|| format!("initializing legacy RPC client for {url}"))
+    }
 
-        Ok(Self { api })
+    pub async fn connect(url: &str) -> Result<Self> {
+        let api = Self::connect_client(url).await?;
+        Ok(Self {
+            rpc_url: url.to_owned(),
+            api: Arc::new(RwLock::new(api)),
+        })
+    }
+
+    pub async fn connect_with_retry(url: &str) -> Self {
+        loop {
+            match Self::connect(url).await {
+                Ok(client) => {
+                    info!(rpc_url = url, "connected to blockchain RPC");
+                    return client;
+                }
+                Err(err) => {
+                    error!(?err, rpc_url = url, "RPC connection failed; retrying");
+                    sleep(RPC_RETRY_DELAY).await;
+                }
+            }
+        }
+    }
+
+    pub async fn reconnect(&self) {
+        loop {
+            match Self::connect_client(&self.rpc_url).await {
+                Ok(api) => {
+                    *self.api.write().await = api;
+                    info!(rpc_url = %self.rpc_url, "reconnected to blockchain RPC");
+                    return;
+                }
+                Err(err) => {
+                    error!(?err, rpc_url = %self.rpc_url, "RPC reconnection failed; retrying");
+                    sleep(RPC_RETRY_DELAY).await;
+                }
+            }
+        }
+    }
+
+    async fn client(&self) -> tokio::sync::RwLockReadGuard<'_, OnlineClient<PolkadotConfig>> {
+        self.api.read().await
     }
 
     async fn fetch(&self, pallet: &str, entry: &str) -> Result<Option<Value>> {
         let address = storage::<Vec<Value>, Value>(pallet, entry);
         Ok(self
-            .api
+            .client()
+            .await
             .at_current_block()
             .await?
             .storage()
@@ -256,7 +307,8 @@ impl SubxtKusama {
         let account = decode_account_id(address).ok_or_else(|| anyhow!("invalid SS58 address"))?;
         let storage_address = storage::<Vec<Value>, Value>(pallet, entry);
         Ok(self
-            .api
+            .client()
+            .await
             .at_current_block()
             .await?
             .storage()
@@ -268,7 +320,7 @@ impl SubxtKusama {
 
     async fn map_addresses(&self, pallet: &str, entry: &str) -> Result<Vec<String>> {
         let address = storage::<Vec<Value>, Value>(pallet, entry);
-        let at_block = self.api.at_current_block().await?;
+        let at_block = self.client().await.at_current_block().await?;
         let storage = at_block.storage();
         let mut iter = storage.iter(address, Vec::<Value>::new()).await?;
         let mut addresses = Vec::new();
@@ -283,12 +335,33 @@ impl SubxtKusama {
         Ok(addresses)
     }
 
-    pub async fn watch_society_events<F, Fut>(&self, mut on_event: F) -> Result<()>
+    pub async fn watch_society_events<F, Fut>(&self, mut on_event: F) -> !
     where
         F: FnMut(SocietyEvent) -> Fut,
         Fut: Future<Output = Result<()>>,
     {
-        let mut blocks = self.api.stream_best_blocks().await?;
+        loop {
+            match self.watch_society_events_once(&mut on_event).await {
+                Ok(()) => warn!(
+                    rpc_url = %self.rpc_url,
+                    "RPC block stream ended; reconnecting"
+                ),
+                Err(err) => error!(
+                    ?err,
+                    rpc_url = %self.rpc_url,
+                    "RPC block stream failed; reconnecting"
+                ),
+            }
+            self.reconnect().await;
+        }
+    }
+
+    async fn watch_society_events_once<F, Fut>(&self, on_event: &mut F) -> Result<()>
+    where
+        F: FnMut(SocietyEvent) -> Fut,
+        Fut: Future<Output = Result<()>>,
+    {
+        let mut blocks = self.client().await.stream_best_blocks().await?;
         while let Some(block) = blocks.next().await {
             let block = block?;
             let block_number = block.number();
@@ -350,7 +423,7 @@ impl ChainData for SubxtKusama {
 
     async fn candidates_raw(&self) -> Result<Vec<Candidate>> {
         let address = storage::<Vec<Value>, Value>("Society", "Candidates");
-        let at_block = self.api.at_current_block().await?;
+        let at_block = self.client().await.at_current_block().await?;
         let storage = at_block.storage();
         let mut iter = storage.iter(address, Vec::<Value>::new()).await?;
         let mut candidates = Vec::new();
