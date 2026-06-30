@@ -93,8 +93,8 @@ where
             )
         }
         "countdown" => {
-            let (current_block, next_intake_at) = society.get_intake_countdown().await?;
-            let blocks_remaining = next_intake_at.saturating_sub(current_block);
+            let (relay_block, next_intake_at) = society.get_intake_countdown().await?;
+            let blocks_remaining = next_intake_at.saturating_sub(relay_block);
             intake_countdown_message(blocks_remaining, next_intake_at)
         }
         "skeptics" | "skeptic" => {
@@ -355,6 +355,23 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .contains("**Candidate skeptic:**")
+        );
+    }
+
+    #[tokio::test]
+    async fn countdown_uses_relay_block_number() {
+        let mut chain = FakeChain::default();
+        chain.block_number = 999_999;
+        chain.relay_block_number = 1;
+        chain.next_intake_at = Some(1_005);
+        let society = test_society(chain);
+
+        assert_eq!(
+            handle_command(&society, "!", "@testuser:matrix.org", "!countdown", None)
+                .await
+                .unwrap()
+                .unwrap(),
+            "Next intake in 0 days, 1 hour, 40 minutes and 24 seconds (at block 1005)"
         );
     }
 

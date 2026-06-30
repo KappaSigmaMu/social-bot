@@ -35,6 +35,7 @@ pub trait ChainData: Send + Sync {
     async fn candidate_skeptic(&self) -> Result<Option<String>>;
     async fn founder(&self) -> Result<Option<String>>;
     async fn block_number(&self) -> Result<u64>;
+    async fn relay_block_number(&self) -> Result<u64>;
     async fn next_intake_at(&self) -> Result<Option<u64>>;
     async fn identity_matrix_handle(&self, address: &str) -> Result<Option<String>>;
 }
@@ -169,13 +170,13 @@ where
     }
 
     pub async fn get_intake_countdown(&self) -> Result<(u64, u64)> {
-        let current_block = self.chain.block_number().await?;
+        let relay_block = self.chain.relay_block_number().await?;
         let next_intake_at = self
             .chain
             .next_intake_at()
             .await?
             .ok_or_else(|| anyhow!("NextIntakeAt is unavailable on chain"))?;
-        Ok((current_block, next_intake_at))
+        Ok((relay_block, next_intake_at))
     }
 
     pub async fn get_head_address(&self) -> Result<Option<String>> {
@@ -524,6 +525,26 @@ impl ChainData for SubxtKusama {
             .unwrap_or_default() as u64)
     }
 
+    async fn relay_block_number(&self) -> Result<u64> {
+        match self
+            .fetch("ParachainSystem", "LastRelayChainBlockNumber")
+            .await
+        {
+            Ok(Some(value)) => Ok(value.as_u128().unwrap_or_default() as u64),
+            Ok(None) => self.block_number().await,
+            Err(error)
+                if is_missing_storage_metadata(
+                    &error,
+                    "ParachainSystem",
+                    "LastRelayChainBlockNumber",
+                ) =>
+            {
+                self.block_number().await
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     async fn next_intake_at(&self) -> Result<Option<u64>> {
         Ok(self
             .fetch("Society", "NextIntakeAt")
@@ -728,6 +749,7 @@ pub mod tests {
         pub head: Option<String>,
         pub candidate_skeptic: Option<String>,
         pub block_number: u64,
+        pub relay_block_number: u64,
         pub next_intake_at: Option<u64>,
         pub identities: HashMap<String, String>,
     }
@@ -779,6 +801,10 @@ pub mod tests {
 
         async fn block_number(&self) -> Result<u64> {
             Ok(self.block_number)
+        }
+
+        async fn relay_block_number(&self) -> Result<u64> {
+            Ok(self.relay_block_number)
         }
 
         async fn next_intake_at(&self) -> Result<Option<u64>> {
