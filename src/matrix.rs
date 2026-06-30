@@ -1,7 +1,7 @@
 use crate::chain::{ChainData, Society, SubxtKusama};
 use crate::commands::handle_command;
 use crate::messages::{new_bid_message, period_message, unbid_message};
-use crate::models::{Bid, CandidatePeriodKind, SocietyEvent};
+use crate::models::{Bid, CandidatePeriodKind, SeenSocietyEvents, SocietyEvent};
 use anyhow::{Context, Result};
 use reqwest::{Client, Url};
 use serde::Deserialize;
@@ -203,22 +203,31 @@ impl MatrixClient {
         room_id: String,
         society: Arc<Society<SubxtKusama>>,
         chain: SubxtKusama,
+        seen_events: Arc<SeenSocietyEvents>,
     ) -> Result<()> {
-        loop {
-            match chain.stream_society_events().await {
-                Ok(events) => {
-                    for event in events {
-                        match event {
-                            SocietyEvent::Bid {
-                                block_number,
-                                address,
-                                bid_plancks,
-                            } => {
-                                let address_or_handle = society
-                                    .get_matrix_handle(&address)
-                                    .await?
-                                    .unwrap_or(address);
-                                self.send_message(
+        chain
+            .watch_society_events(|event| {
+                let room_id = room_id.clone();
+                let society = society.clone();
+                let seen_events = seen_events.clone();
+                let matrix = self.clone();
+                async move {
+                    if !seen_events.mark_seen(event.id()) {
+                        return Ok(());
+                    }
+                    match event {
+                        SocietyEvent::Bid {
+                            block_number,
+                            address,
+                            bid_plancks,
+                            ..
+                        } => {
+                            let address_or_handle = society
+                                .get_matrix_handle(&address)
+                                .await?
+                                .unwrap_or(address);
+                            matrix
+                                .send_message(
                                     &room_id,
                                     &new_bid_message(
                                         block_number,
@@ -229,27 +238,28 @@ impl MatrixClient {
                                     ),
                                 )
                                 .await?;
-                            }
-                            SocietyEvent::Unbid {
-                                block_number,
-                                address,
-                            } => {
-                                let address_or_handle = society
-                                    .get_matrix_handle(&address)
-                                    .await?
-                                    .unwrap_or(address);
-                                self.send_message(
+                        }
+                        SocietyEvent::Unbid {
+                            block_number,
+                            address,
+                            ..
+                        } => {
+                            let address_or_handle = society
+                                .get_matrix_handle(&address)
+                                .await?
+                                .unwrap_or(address);
+                            matrix
+                                .send_message(
                                     &room_id,
                                     &unbid_message(block_number, &address_or_handle),
                                 )
                                 .await?;
-                            }
                         }
                     }
+                    Ok(())
                 }
-                Err(err) => error!(?err, "failed to stream society events"),
-            }
-        }
+            })
+            .await
     }
 }
 

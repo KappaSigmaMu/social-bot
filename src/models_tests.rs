@@ -1,6 +1,39 @@
 #[cfg(test)]
 mod tests {
-    use crate::models::{CandidatePeriod, CandidatePeriodKind, MemberState};
+    use crate::models::{
+        CandidatePeriod, CandidatePeriodKind, MemberState, SeenSocietyEvents, SocietyEventId,
+        SocietyEventKind,
+    };
+
+    #[test]
+    fn deduplicates_society_events_by_stable_id() {
+        let seen = SeenSocietyEvents::new();
+        let id = SocietyEventId {
+            block_hash: [1u8; 32],
+            event_index: 7,
+            kind: SocietyEventKind::Bid,
+        };
+
+        assert!(seen.mark_seen(&id));
+        assert!(!seen.mark_seen(&id));
+    }
+
+    #[test]
+    fn keeps_distinct_events_in_the_same_block() {
+        let seen = SeenSocietyEvents::new();
+        let block_hash = [2u8; 32];
+
+        assert!(seen.mark_seen(&SocietyEventId {
+            block_hash,
+            event_index: 0,
+            kind: SocietyEventKind::Bid,
+        }));
+        assert!(seen.mark_seen(&SocietyEventId {
+            block_hash,
+            event_index: 1,
+            kind: SocietyEventKind::Unbid,
+        }));
+    }
 
     #[test]
     fn displays_member_states() {

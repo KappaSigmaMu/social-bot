@@ -93,17 +93,66 @@ pub struct Bid {
     pub bid_plancks: u128,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SocietyEventKind {
+    Bid,
+    Unbid,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SocietyEventId {
+    pub block_hash: [u8; 32],
+    pub event_index: u32,
+    pub kind: SocietyEventKind,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SocietyEvent {
     Bid {
+        id: SocietyEventId,
         block_number: u64,
         address: String,
         bid_plancks: u128,
     },
     Unbid {
+        id: SocietyEventId,
         block_number: u64,
         address: String,
     },
+}
+
+impl SocietyEvent {
+    pub fn id(&self) -> &SocietyEventId {
+        match self {
+            Self::Bid { id, .. } | Self::Unbid { id, .. } => id,
+        }
+    }
+}
+
+pub struct SeenSocietyEvents {
+    seen: std::sync::Mutex<std::collections::HashSet<SocietyEventId>>,
+}
+
+impl SeenSocietyEvents {
+    pub fn new() -> Self {
+        Self {
+            seen: std::sync::Mutex::new(std::collections::HashSet::new()),
+        }
+    }
+
+    /// Returns `true` when this event has not been announced yet.
+    pub fn mark_seen(&self, id: &SocietyEventId) -> bool {
+        self.seen
+            .lock()
+            .expect("seen society events lock poisoned")
+            .insert(id.clone())
+    }
+}
+
+impl Default for SeenSocietyEvents {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

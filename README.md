@@ -179,7 +179,7 @@ cargo society:bid
 cargo society:unbid
 ```
 
-The bot should log observed blocks/events and send Matrix messages like:
+The bot should log observed blocks/events and send exactly one Matrix message per Society bid/unbid event, keyed by block hash and event index. If the bot restarts, in-memory dedupe resets and a previously announced event could be announced again.
 
 - `Submitted Society bid at block X from Y for Z KSM`
 - `Submitted Society unbid at block X from Y`

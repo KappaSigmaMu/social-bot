@@ -2,6 +2,7 @@ use anyhow::Result;
 use element_bot::chain::{Society, SubxtKusama};
 use element_bot::config::Config;
 use element_bot::matrix::MatrixClient;
+use element_bot::models::SeenSocietyEvents;
 use element_bot::store::OverrideStore;
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
@@ -30,6 +31,7 @@ async fn main() -> Result<()> {
     let store = OverrideStore::open(&config.db_path)?;
     let chain = SubxtKusama::connect(&config.rpc_url).await?;
     tracing::info!(rpc_url = %config.rpc_url, "connected bot to blockchain RPC");
+    let seen_society_events = Arc::new(SeenSocietyEvents::new());
     let log_chain = chain.clone();
     let event_chain = chain.clone();
     let society = Arc::new(Society::new(chain, store));
@@ -55,9 +57,10 @@ async fn main() -> Result<()> {
     let events_matrix = matrix.clone();
     let events_room = room_id.clone();
     let events_society = society.clone();
+    let events_seen = seen_society_events.clone();
     tokio::spawn(async move {
         if let Err(err) = events_matrix
-            .announce_society_events(events_room, events_society, event_chain)
+            .announce_society_events(events_room, events_society, event_chain, events_seen)
             .await
         {
             tracing::error!(?err, "society event announcer stopped");

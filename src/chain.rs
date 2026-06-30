@@ -1,11 +1,13 @@
 use crate::models::{
-    Bid, Candidate, CandidatePeriod, Defender, MemberInfo, MemberState, SocietyEvent, Tally,
+    Bid, Candidate, CandidatePeriod, Defender, MemberInfo, MemberState, SocietyEvent,
+    SocietyEventId, SocietyEventKind, Tally,
 };
 use crate::ss58::{decode_account_id, encode_account_id, is_valid_address, is_valid_matrix_handle};
 use crate::store::OverrideStore;
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use serde_json::Value as JsonValue;
+use std::future::Future;
 use std::sync::{Arc, Mutex};
 use subxt::backend::LegacyBackend;
 use subxt::dynamic::{Value, storage};
@@ -271,13 +273,16 @@ impl SubxtKusama {
         Ok(addresses)
     }
 
-    pub async fn stream_society_events(&self) -> Result<Vec<SocietyEvent>> {
+    pub async fn watch_society_events<F, Fut>(&self, mut on_event: F) -> Result<()>
+    where
+        F: FnMut(SocietyEvent) -> Fut,
+        Fut: Future<Output = Result<()>>,
+    {
         let mut blocks = self.api.stream_best_blocks().await?;
-        let mut out = Vec::new();
         while let Some(block) = blocks.next().await {
             let block = block?;
             let block_number = block.number();
-            let block_hash = block.hash();
+            let block_hash = block.hash().0;
             info!(block_number, ?block_hash, "received blockchain block");
             let at_block = block.at().await?;
             let events = at_block.events().fetch().await?;
@@ -285,10 +290,12 @@ impl SubxtKusama {
                 let event = event?;
                 let pallet_name = event.pallet_name();
                 let event_name = event.event_name();
+                let event_index = event.index();
                 let values = event.decode_fields_unchecked_as::<Value>()?;
                 let json = value_to_json(values)?;
                 info!(
                     block_number,
+                    event_index,
                     pallet = pallet_name,
                     event = event_name,
                     fields = %json,
@@ -297,34 +304,15 @@ impl SubxtKusama {
                 if pallet_name != "Society" {
                     continue;
                 }
-                match event_name {
-                    "Bid" => {
-                        let Some(account) = find_account_ids(&json).into_iter().next() else {
-                            continue;
-                        };
-                        out.push(SocietyEvent::Bid {
-                            block_number,
-                            address: encode_account_id(&account, KUSAMA_SS58_PREFIX),
-                            bid_plancks: find_u128_by_key(&json, "offer").unwrap_or_default(),
-                        });
-                    }
-                    "Unbid" => {
-                        let Some(account) = find_account_ids(&json).into_iter().next() else {
-                            continue;
-                        };
-                        out.push(SocietyEvent::Unbid {
-                            block_number,
-                            address: encode_account_id(&account, KUSAMA_SS58_PREFIX),
-                        });
-                    }
-                    _ => {}
-                }
-            }
-            if !out.is_empty() {
-                return Ok(out);
+                let Some(society_event) =
+                    parse_society_event(block_number, block_hash, event_index, event_name, &json)
+                else {
+                    continue;
+                };
+                on_event(society_event).await?;
             }
         }
-        Ok(out)
+        Ok(())
     }
 
     pub async fn log_all_chain_activity(&self) -> Result<()> {
@@ -502,6 +490,43 @@ impl ChainData for SubxtKusama {
     }
 }
 
+fn parse_society_event(
+    block_number: u64,
+    block_hash: [u8; 32],
+    event_index: u32,
+    event_name: &str,
+    json: &JsonValue,
+) -> Option<SocietyEvent> {
+    match event_name {
+        "Bid" => {
+            let account = find_account_ids(json).into_iter().next()?;
+            Some(SocietyEvent::Bid {
+                id: SocietyEventId {
+                    block_hash,
+                    event_index,
+                    kind: SocietyEventKind::Bid,
+                },
+                block_number,
+                address: encode_account_id(&account, KUSAMA_SS58_PREFIX),
+                bid_plancks: find_u128_by_key(json, "offer").unwrap_or_default(),
+            })
+        }
+        "Unbid" => {
+            let account = find_account_ids(json).into_iter().next()?;
+            Some(SocietyEvent::Unbid {
+                id: SocietyEventId {
+                    block_hash,
+                    event_index,
+                    kind: SocietyEventKind::Unbid,
+                },
+                block_number,
+                address: encode_account_id(&account, KUSAMA_SS58_PREFIX),
+            })
+        }
+        _ => None,
+    }
+}
+
 fn is_missing_storage_metadata(error: &anyhow::Error, pallet: &str, entry: &str) -> bool {
     if let Some(error) = error.downcast_ref::<StorageError>() {
         return storage_error_is_missing_metadata(error, pallet, entry);
@@ -629,7 +654,7 @@ fn find_raw_string(value: &JsonValue) -> Option<String> {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::models::CandidatePeriodKind;
+    use crate::models::{CandidatePeriodKind, SocietyEventKind};
     use std::collections::{HashMap, HashSet};
 
     #[derive(Default)]
@@ -868,6 +893,44 @@ pub mod tests {
         key.extend([9u8; 32]);
         assert_eq!(account_from_key(&key), Some([9u8; 32]));
         assert_eq!(account_from_key(&[1, 2, 3]), None);
+    }
+
+    #[test]
+    fn parses_society_bid_and_unbid_events() {
+        let account = [7u8; 32];
+        let block_hash = [9u8; 32];
+        let json = serde_json::json!({"who": account, "offer": "5000000000000"});
+
+        let bid = parse_society_event(42, block_hash, 3, "Bid", &json).unwrap();
+        assert!(matches!(
+            bid,
+            SocietyEvent::Bid {
+                block_number: 42,
+                bid_plancks: 5_000_000_000_000,
+                ..
+            }
+        ));
+        assert_eq!(bid.id().event_index, 3);
+        assert_eq!(bid.id().kind, SocietyEventKind::Bid);
+
+        let unbid = parse_society_event(
+            42,
+            block_hash,
+            4,
+            "Unbid",
+            &serde_json::json!({"who": account}),
+        )
+        .unwrap();
+        assert!(matches!(
+            unbid,
+            SocietyEvent::Unbid {
+                block_number: 42,
+                ..
+            }
+        ));
+        assert_eq!(unbid.id().event_index, 4);
+        assert_eq!(unbid.id().kind, SocietyEventKind::Unbid);
+        assert!(parse_society_event(42, block_hash, 5, "Voted", &json).is_none());
     }
 
     #[test]
