@@ -1,13 +1,13 @@
 use anyhow::{Context, Result};
-use element_bot::config::Config;
-use element_bot::logging;
-use element_bot::overrides_import::{HistoryMessage, replay_override_history};
-use element_bot::room_archive::load_history_messages;
-use element_bot::store::OverrideStore;
+use social_bot::config::Config;
+use social_bot::logging;
+use social_bot::overrides_import::{HistoryMessage, replay_override_history};
+use social_bot::room_archive::load_history_messages;
+use social_bot::store::OverrideStore;
 use std::env;
 use std::path::PathBuf;
 
-const DEFAULT_BOT_USER_ID: &str = "@societybot:matrix.org";
+const DEFAULT_BOT_USER_ID: &str = "@kappasigmabot:matrix.org";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -87,7 +87,7 @@ fn count_command_messages(messages: &[HistoryMessage], prefix: &str) -> u64 {
         .count() as u64
 }
 
-fn print_stats(stats: &element_bot::overrides_import::ImportStats, dry_run: bool) {
+fn print_stats(stats: &social_bot::overrides_import::ImportStats, dry_run: bool) {
     tracing::info!(
         messages_seen = stats.messages_seen,
         set_commands = stats.set_commands,
@@ -112,7 +112,7 @@ fn print_usage() {
          Defaults come from .env:\n\
            PREFIX, DB_PATH\n\
            --input defaults to ./room-export\n\
-           --bot-user-id defaults to @societybot:matrix.org\n\n\
+           --bot-user-id defaults to @kappasigmabot:matrix.org\n\n\
          Example:\n\
            cargo export --output ./exports/kappasigmamulounge\n\
            cargo seed --input ./exports/kappasigmamulounge --dry-run\n\

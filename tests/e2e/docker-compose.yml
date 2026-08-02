@@ -43,6 +43,22 @@ services:
       timeout: 2s
       retries: 30
 
+  x-mock:
+    image: python:3.13-slim
+    working_dir: /e2e
+    command: ["python", "x_mock.py"]
+    volumes:
+      - .:/e2e:ro
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/_x/health', timeout=1)"
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
   bot:
     build:
       context: ../..
@@ -55,10 +71,16 @@ services:
       DB_PATH: /tmp/society_overrides.db
       PREFIX: "!"
       RUST_LOG: warn
+      X_WEBHOOK_URL: http://x-mock:8081/webhook
+      HEALTHCHECK_ADDR: 0.0.0.0:8080
+    ports:
+      - "8080:8080"
     depends_on:
       chopsticks:
         condition: service_healthy
       matrix:
+        condition: service_healthy
+      x-mock:
         condition: service_healthy
 
   e2e:
@@ -69,6 +91,8 @@ services:
       - .:/e2e:ro
     environment:
       MATRIX_TEST_URL: http://matrix:8008
+      BOT_HEALTH_URL: http://bot:8080/health
+      X_MOCK_URL: http://x-mock:8081
     depends_on:
       bot:
         condition: service_started

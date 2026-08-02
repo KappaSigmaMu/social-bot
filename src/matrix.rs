@@ -1,7 +1,5 @@
-use crate::chain::{ChainData, Society, SubxtKusama};
+use crate::chain::{ChainData, Society};
 use crate::commands::handle_command;
-use crate::messages::{new_bid_message, period_message, unbid_message};
-use crate::models::{Bid, CandidatePeriodKind, SeenSocietyEvents, SocietyEvent};
 use crate::overrides_import::HistoryMessage;
 use anyhow::{Context, Result};
 use reqwest::{Client, Url};
@@ -27,6 +25,13 @@ pub enum RoomTarget {
     RoomAlias(String),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MessageRelation {
+    None,
+    Reply(String),
+    Thread(String),
+}
+
 impl MatrixClient {
     pub fn new(homeserver: &str, token: String, user_id: String) -> Result<Self> {
         Ok(Self {
@@ -37,12 +42,35 @@ impl MatrixClient {
         })
     }
 
+    /// Sends a plain message (optionally replying to `in_reply_to`) and returns the new event ID.
     pub async fn send_message(
         &self,
         room_id: &str,
         body: &str,
         in_reply_to: Option<&str>,
-    ) -> Result<()> {
+    ) -> Result<String> {
+        let relation = in_reply_to
+            .map(|event_id| MessageRelation::Reply(event_id.to_owned()))
+            .unwrap_or(MessageRelation::None);
+        self.send(room_id, body, &relation).await
+    }
+
+    /// Sends a message into the thread rooted at `root_event_id` and returns the new event ID.
+    pub async fn send_thread_message(
+        &self,
+        room_id: &str,
+        body: &str,
+        root_event_id: &str,
+    ) -> Result<String> {
+        self.send(
+            room_id,
+            body,
+            &MessageRelation::Thread(root_event_id.to_owned()),
+        )
+        .await
+    }
+
+    async fn send(&self, room_id: &str, body: &str, relation: &MessageRelation) -> Result<String> {
         let txn_id = format!(
             "{}",
             std::time::SystemTime::now()
@@ -50,21 +78,26 @@ impl MatrixClient {
                 .as_nanos()
         );
         let url = self.send_message_url(room_id, &txn_id)?;
-        self.http
+        let response = self
+            .http
             .put(url)
             .bearer_auth(&self.token)
-            .json(&message_payload(body, in_reply_to))
+            .json(&message_payload(body, relation))
             .send()
             .await?
             .error_for_status()
             .context("sending Matrix message")?;
+        let send: SendResponse = response
+            .json()
+            .await
+            .context("decoding Matrix send response")?;
         info!(
             room_id,
             message = strip_markdown(body),
-            in_reply_to,
+            event_id = %send.event_id,
             "sent Matrix message"
         );
-        Ok(())
+        Ok(send.event_id)
     }
 
     async fn sync(&self, since: Option<&str>) -> Result<SyncResponse> {
@@ -298,11 +331,7 @@ impl MatrixClient {
                             {
                                 Ok(Some(response)) => {
                                     if let Err(err) = self
-                                        .send_message(
-                                            room_id,
-                                            &response,
-                                            event.event_id.as_deref(),
-                                        )
+                                        .send_message(room_id, &response, event.event_id.as_deref())
                                         .await
                                     {
                                         error!(?err, "failed to send Matrix response");
@@ -331,117 +360,6 @@ impl MatrixClient {
             info!("Matrix sync cycle complete");
         }
     }
-
-    pub async fn announce_period_changes<C>(
-        &self,
-        room_id: String,
-        society: Arc<Society<C>>,
-        rpc_chain: SubxtKusama,
-    ) where
-        C: ChainData + 'static,
-    {
-        let mut last_period: Option<CandidatePeriodKind> = None;
-        loop {
-            match period_snapshot(society.as_ref()).await {
-                Ok((period_kind, message)) => {
-                    if let Some(last_period) = last_period
-                        && last_period != period_kind
-                        && let Err(err) = self.send_message(&room_id, &message, None).await
-                    {
-                        error!(?err, "failed to announce period change");
-                    }
-                    last_period = Some(period_kind);
-                }
-                Err(err) => {
-                    error!(?err, "failed to poll candidate period; reconnecting RPC");
-                    rpc_chain.reconnect().await;
-                }
-            }
-            sleep(Duration::from_secs(60)).await;
-        }
-    }
-
-    pub async fn announce_society_events(
-        &self,
-        room_id: String,
-        society: Arc<Society<SubxtKusama>>,
-        chain: SubxtKusama,
-        seen_events: Arc<SeenSocietyEvents>,
-    ) {
-        chain
-            .watch_society_events(|event| {
-                let room_id = room_id.clone();
-                let society = society.clone();
-                let seen_events = seen_events.clone();
-                let matrix = self.clone();
-                async move {
-                    if !seen_events.mark_seen(event.id()) {
-                        return Ok(());
-                    }
-                    match event {
-                        SocietyEvent::Bid {
-                            block_number,
-                            address,
-                            bid_plancks,
-                            ..
-                        } => {
-                            let address_or_handle =
-                                society.format_account_display(&address).await?;
-                            matrix
-                                .send_message(
-                                    &room_id,
-                                    &new_bid_message(
-                                        block_number,
-                                        &Bid {
-                                            address_or_handle,
-                                            bid_plancks,
-                                        },
-                                    ),
-                                    None,
-                                )
-                                .await?;
-                        }
-                        SocietyEvent::Unbid {
-                            block_number,
-                            address,
-                            ..
-                        } => {
-                            let address_or_handle =
-                                society.format_account_display(&address).await?;
-                            matrix
-                                .send_message(
-                                    &room_id,
-                                    &unbid_message(block_number, &address_or_handle),
-                                    None,
-                                )
-                                .await?;
-                        }
-                    }
-                    Ok(())
-                }
-            })
-            .await;
-    }
-}
-
-async fn period_snapshot<C>(society: &Society<C>) -> Result<(CandidatePeriodKind, String)>
-where
-    C: ChainData,
-{
-    let period = society.get_candidate_period().await?;
-    let defender = society.get_defending().await?;
-    let candidates = society.get_candidates().await?;
-    let head = society.get_head_display().await?;
-    let candidate_skeptic = society.get_candidate_skeptic().await?;
-    let message = period_message(
-        &period,
-        &defender,
-        &candidates,
-        head.as_deref(),
-        candidate_skeptic.as_deref(),
-        true,
-    );
-    Ok((period.kind, message))
 }
 
 fn url_escape(value: &str) -> String {
@@ -466,19 +384,32 @@ fn parse_room_target(value: &str) -> Result<RoomTarget> {
     anyhow::bail!("MATRIX_ROOM must start with '!' for a room ID or '#' for a room alias");
 }
 
-fn message_payload(body: &str, in_reply_to: Option<&str>) -> serde_json::Value {
+fn message_payload(body: &str, relation: &MessageRelation) -> serde_json::Value {
     let mut payload = json!({
         "msgtype": "m.text",
         "body": strip_markdown(body),
         "format": "org.matrix.custom.html",
         "formatted_body": markdown_to_html(body),
     });
-    if let Some(event_id) = in_reply_to {
-        payload["m.relates_to"] = json!({
-            "m.in_reply_to": {
-                "event_id": event_id,
-            }
-        });
+    match relation {
+        MessageRelation::None => {}
+        MessageRelation::Reply(event_id) => {
+            payload["m.relates_to"] = json!({
+                "m.in_reply_to": {
+                    "event_id": event_id,
+                }
+            });
+        }
+        MessageRelation::Thread(root_event_id) => {
+            payload["m.relates_to"] = json!({
+                "rel_type": "m.thread",
+                "event_id": root_event_id,
+                "is_falling_back": true,
+                "m.in_reply_to": {
+                    "event_id": root_event_id,
+                }
+            });
+        }
     }
     payload
 }
@@ -617,6 +548,11 @@ impl From<RoomTimelineEventRaw> for RoomTimelineEvent {
 }
 
 #[derive(Debug, Deserialize)]
+struct SendResponse {
+    event_id: String,
+}
+
+#[derive(Debug, Deserialize)]
 struct SyncResponse {
     next_batch: String,
     #[serde(default)]
@@ -666,14 +602,16 @@ mod tests {
     use super::*;
     use crate::chain::Society;
     use crate::chain::tests::FakeChain;
-    use crate::models::{Candidate, Tally};
     use crate::store::OverrideStore;
     use tempfile::NamedTempFile;
 
     fn test_society(chain: FakeChain) -> Society<FakeChain> {
         let file = NamedTempFile::new().unwrap();
         let path = file.into_temp_path().keep().unwrap();
-        Society::new(chain, OverrideStore::open(path).unwrap())
+        Society::new(
+            chain,
+            Arc::new(std::sync::Mutex::new(OverrideStore::open(path).unwrap())),
+        )
     }
 
     #[test]
@@ -769,33 +707,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn builds_period_snapshot_message() {
-        let mut chain = FakeChain {
-            block_number: 1,
-            head: Some("@head:matrix.org".to_owned()),
-            defender: Some("@defender:matrix.org".to_owned()),
-            defender_skeptic: Some("@defender-skeptic:matrix.org".to_owned()),
-            candidate_skeptic: Some("@candidate-skeptic:matrix.org".to_owned()),
-            ..Default::default()
-        };
-        chain.candidates.push(Candidate {
-            address_or_handle: "@candidate:matrix.org".to_owned(),
-            bid_plancks: 1_000_000_000_000,
-            tally: Tally {
-                approvals: 1,
-                rejections: 0,
-            },
-        });
-        let society = test_society(chain);
-
-        let (kind, message) = period_snapshot(&society).await.unwrap();
-        assert_eq!(kind, CandidatePeriodKind::Voting);
-        assert!(message.contains("**New voting period started**"));
-        assert!(message.contains("@candidate:matrix.org"));
-    }
-
-    #[test]
-    fn builds_matrix_urls_and_payloads() {
+    async fn builds_matrix_urls_and_payloads() {
         let client = MatrixClient::new(
             "https://matrix.example",
             "token".to_owned(),
@@ -819,7 +731,7 @@ mod tests {
             "https://matrix.example/_matrix/client/v3/sync?timeout=30000&since=s0"
         );
         assert_eq!(
-            message_payload("hello", None),
+            message_payload("hello", &MessageRelation::None),
             serde_json::json!({
                 "msgtype": "m.text",
                 "body": "hello",
@@ -827,14 +739,14 @@ mod tests {
                 "formatted_body": "hello",
             })
         );
-        let payload = message_payload("**Head:** `alice`\n· item", None);
+        let payload = message_payload("**Head:** `alice`\n· item", &MessageRelation::None);
         assert_eq!(payload["body"], "Head: alice\n· item");
         assert_eq!(
             payload["formatted_body"],
             "<strong>Head:</strong> <code>alice</code><br/>· item"
         );
         assert_eq!(
-            message_payload("Pong!", Some("$event123")),
+            message_payload("Pong!", &MessageRelation::Reply("$event123".to_owned())),
             serde_json::json!({
                 "msgtype": "m.text",
                 "body": "Pong!",
@@ -845,6 +757,25 @@ mod tests {
                         "event_id": "$event123",
                     }
                 },
+            })
+        );
+    }
+
+    #[test]
+    fn builds_thread_payload_referencing_the_round_root() {
+        let payload = message_payload(
+            "Thread message",
+            &MessageRelation::Thread("$round-root".to_owned()),
+        );
+        assert_eq!(
+            payload["m.relates_to"],
+            serde_json::json!({
+                "rel_type": "m.thread",
+                "event_id": "$round-root",
+                "is_falling_back": true,
+                "m.in_reply_to": {
+                    "event_id": "$round-root",
+                }
             })
         );
     }
@@ -861,7 +792,7 @@ mod tests {
 
     #[test]
     fn escapes_html_in_matrix_messages() {
-        let payload = message_payload("**Alert** `<script>`", None);
+        let payload = message_payload("**Alert** `<script>`", &MessageRelation::None);
         assert_eq!(
             payload["formatted_body"],
             "<strong>Alert</strong> <code>&lt;script&gt;</code>"

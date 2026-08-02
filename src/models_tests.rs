@@ -1,39 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::models::{
-        CandidatePeriod, CandidatePeriodKind, MemberState, SeenSocietyEvents, SocietyEventId,
-        SocietyEventKind,
-    };
-
-    #[test]
-    fn deduplicates_society_events_by_stable_id() {
-        let seen = SeenSocietyEvents::new();
-        let id = SocietyEventId {
-            block_hash: [1u8; 32],
-            event_index: 7,
-            kind: SocietyEventKind::Bid,
-        };
-
-        assert!(seen.mark_seen(&id));
-        assert!(!seen.mark_seen(&id));
-    }
-
-    #[test]
-    fn keeps_distinct_events_in_the_same_block() {
-        let seen = SeenSocietyEvents::new();
-        let block_hash = [2u8; 32];
-
-        assert!(seen.mark_seen(&SocietyEventId {
-            block_hash,
-            event_index: 0,
-            kind: SocietyEventKind::Bid,
-        }));
-        assert!(seen.mark_seen(&SocietyEventId {
-            block_hash,
-            event_index: 1,
-            kind: SocietyEventKind::Unbid,
-        }));
-    }
+    use crate::models::{CandidatePeriod, CandidatePeriodKind, MemberState, SocietyEventKind};
 
     #[test]
     fn displays_member_states() {
@@ -41,6 +8,32 @@ mod tests {
         assert_eq!(MemberState::Candidate.to_string(), "candidate");
         assert_eq!(MemberState::SuspendedMember.to_string(), "suspended member");
         assert_eq!(MemberState::NonMember.to_string(), "non-member");
+    }
+
+    #[test]
+    fn event_kinds_round_trip_through_storage_names() {
+        assert_eq!(SocietyEventKind::Bid.as_str(), "Bid");
+        assert_eq!(SocietyEventKind::Unbid.as_str(), "Unbid");
+        assert_eq!(SocietyEventKind::Vouch.as_str(), "Vouch");
+        assert_eq!(SocietyEventKind::Unvouch.as_str(), "Unvouch");
+        assert_eq!(SocietyEventKind::AutoUnbid.as_str(), "AutoUnbid");
+        assert_eq!(SocietyEventKind::Inducted.as_str(), "Inducted");
+        assert_eq!(SocietyEventKind::Challenged.as_str(), "Challenged");
+        assert_eq!(
+            SocietyEventKind::CandidateSuspended.as_str(),
+            "CandidateSuspended"
+        );
+        assert_eq!(
+            SocietyEventKind::MemberSuspended.as_str(),
+            "MemberSuspended"
+        );
+        assert_eq!(
+            SocietyEventKind::SuspendedMemberJudgement.as_str(),
+            "SuspendedMemberJudgement"
+        );
+        assert_eq!(SocietyEventKind::Elevated.as_str(), "Elevated");
+        assert_eq!(SocietyEventKind::Vote.as_str(), "Vote");
+        assert_eq!(SocietyEventKind::DefenderVote.as_str(), "DefenderVote");
     }
 
     #[test]

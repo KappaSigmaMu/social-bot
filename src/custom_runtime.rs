@@ -24,9 +24,7 @@ pub fn ensure_custom_runtime_wasm() -> Result<PathBuf> {
 pub fn build_custom_runtime_wasm() -> Result<()> {
     let submodule = PathBuf::from(SUBMODULE_DIR);
     if !submodule.is_dir() {
-        bail!(
-            "missing {SUBMODULE_DIR}; run `git submodule update --init --recursive` first"
-        );
+        bail!("missing {SUBMODULE_DIR}; run `git submodule update --init --recursive` first");
     }
 
     ensure_submodule_branch(&submodule)?;
@@ -52,12 +50,8 @@ pub fn build_custom_runtime_wasm() -> Result<()> {
     }
 
     let built_wasm = runtime_dir.join(WASM_BUILD_REL);
-    fs::copy(&built_wasm, WASM_OUTPUT).with_context(|| {
-        format!(
-            "copying {} to {WASM_OUTPUT}",
-            built_wasm.display()
-        )
-    })?;
+    fs::copy(&built_wasm, WASM_OUTPUT)
+        .with_context(|| format!("copying {} to {WASM_OUTPUT}", built_wasm.display()))?;
 
     eprintln!("Wrote {WASM_OUTPUT}");
     Ok(())
@@ -89,7 +83,12 @@ pub fn apply_wasm_override(config: &str) -> String {
 
 fn ensure_submodule_branch(submodule: &Path) -> Result<()> {
     let status = Command::new("git")
-        .args(["-C", &submodule.display().to_string(), "rev-parse", "--is-inside-work-tree"])
+        .args([
+            "-C",
+            &submodule.display().to_string(),
+            "rev-parse",
+            "--is-inside-work-tree",
+        ])
         .output()
         .with_context(|| format!("checking git repo at {}", submodule.display()))?;
 

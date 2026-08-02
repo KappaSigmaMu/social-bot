@@ -2,9 +2,10 @@
 
 This harness runs the bot against:
 
-- a Chopsticks fork at `ws://chopsticks:8000`, using the copied Asset Hub config [kusama.yml](/Users/laurogripa/code/kusama/element-bot/tests/e2e/kusama.yml)
+- a Chopsticks fork at `ws://chopsticks:8000`, using the copied Asset Hub config [kusama.yml](kusama.yml)
 - a tiny mock Matrix homeserver
-- a Python assertion runner that exercises `!ping`, `!head`, `!period`, `!defender`, `!skeptics`, `!candidates`, `!set_address`, `!me`, and `!unset_address`
+- a tiny mock X (Twitter) webhook receiver
+- a Python assertion runner that exercises `!ping`, `!head`, `!period`, `!defender`, `!skeptics`, `!candidates`, `!set_address`, `!me`, and `!unset_address`, plus the `GET /health` HTTP endpoint and the X webhook wiring
 
 Run it from the repository root:
 
@@ -26,4 +27,32 @@ docker compose -f tests/e2e/docker-compose.yml down -v
 
 The test needs outbound network access because Chopsticks forks from `wss://kusama-rpc.polkadot.io/` and the first run pulls Docker/npm images.
 
-The Rust `submit_bid` helper is not usable with this copied Asset Hub config; `society.bid` is filtered there and fails with `System::CallFiltered`.
+## What is (and is not) covered
+
+The e2e stack uses the Asset Hub Kusama fork. The Society pallet there has day-length
+rounds and `society.bid` is call-filtered, so no on-chain Society events and no round
+transitions happen during the test window. The runner therefore asserts:
+
+- every Matrix command works as before,
+- `GET /health` returns `200 {"status":"ok",...}`,
+- the X mock webhook records zero posts (the wiring works, but nothing is posted).
+
+The announcement/threading flow — round start as the single main-channel message, every
+later event in its thread, and the X posts for the approved subset — is exercised
+locally against a shortened-round custom runtime:
+
+```sh
+git submodule update --init --recursive
+cargo chopsticks --custom   # builds the custom WASM on first run (takes minutes)
+cargo dev --custom
+```
+
+Then, from another terminal, submit bids so the bot announces them:
+
+```sh
+cargo society:bid
+cargo society:unbid
+```
+
+The custom Kusama runtime shortens Society rounds to a handful of blocks, so round
+transitions (and their thread/root messages) happen within seconds.

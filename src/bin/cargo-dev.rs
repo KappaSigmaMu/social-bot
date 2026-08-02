@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, bail};
-use element_bot::custom_runtime::ensure_custom_runtime_wasm;
+use social_bot::custom_runtime::ensure_custom_runtime_wasm;
 use std::env;
 use std::net::TcpStream;
 use std::process::{Child, Command, ExitCode, Stdio};
@@ -30,12 +30,12 @@ fn run() -> Result<()> {
     }
 
     let status = Command::new("cargo")
-        .args(["run", "--bin", "element-bot", "--", "--dev"])
+        .args(["run", "--bin", "social-bot", "--", "--dev"])
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .status()
-        .context("running element-bot in dev mode")?;
+        .context("running social-bot in dev mode")?;
 
     if let Some(mut child) = chopsticks {
         let _ = child.kill();
@@ -43,7 +43,7 @@ fn run() -> Result<()> {
     }
 
     if !status.success() {
-        bail!("element-bot exited with {status}");
+        bail!("social-bot exited with {status}");
     }
 
     Ok(())

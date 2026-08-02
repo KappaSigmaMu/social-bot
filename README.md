@@ -1,6 +1,7 @@
-# element-bot
+# social-bot
 
-Rust rewrite of `s3krit/society.py`, a Matrix/Element bot for Kusama Society status.
+Rust rewrite of `s3krit/society.py`, a Kusama Society monitor with two outputs —
+Element (Matrix) and X (Twitter) — plus a healthcheck endpoint.
 
 ## Behavior
 
@@ -19,8 +20,37 @@ The bot supports the original command set:
 - `!skeptics`
 - `!skeptic`
 
-It also polls the Kusama candidate period every 60 seconds and announces period transitions to the configured Matrix room.
-It subscribes to chain blocks and announces bid and unbid events to the configured Matrix room.
+### Round threads
+
+The main room gets exactly **one** message per rotation round — the voting-period
+start. Everything else until the next round — bids, vouches, votes, inductees,
+suspensions, the claim-period start, … — is posted as a thread under that round
+message. On a mid-round restart the round root survives in SQLite, so threading
+continues; only when no root exists yet do announcements fall back to the main
+channel (logged as a warning).
+
+### Expanded event monitoring
+
+The bot watches the Society pallet for all meaningful events and announces them in
+the round thread (identities use the on-chain `display` name when available):
+
+`Bid`, `Unbid`, `Vouch`, `Unvouch`, `AutoUnbid`, `Inducted`, `Challenged`,
+`CandidateSuspended`, `MemberSuspended`, `SuspendedMemberJudgement`, `Elevated`,
+`Vote` (individual), `DefenderVote` (individual).
+
+`Founded` / `Unfounded` / `NewParams` / `Deposit` are ignored (genesis/config noise).
+
+### X (Twitter) output
+
+When `X_WEBHOOK_URL` is set, a fixed subset of announcements is also posted to X
+through a Make.com webhook: round start, claim start, `Bid`, `Unbid`, `Vouch`,
+`Inducted`, `Challenged`. Votes are Element-thread-only and never posted to X.
+An X post failure is logged and never blocks or delays the Matrix message.
+
+### Healthcheck
+
+`GET {HEALTHCHECK_ADDR}/health` returns `200 {"status":"ok","uptime_secs":N}`.
+Any other path returns `404`.
 
 ## Configuration
 
@@ -50,11 +80,20 @@ Required:
 Optional:
 
 - `MATRIX_HOMESERVER`: defaults to `https://matrix.org`.
-- `MATRIX_USER_ID`: defaults to `@societybot:matrix.org`, but you should set this explicitly to the bot account that owns `MATRIX_TOKEN`.
+- `MATRIX_USER_ID`: defaults to `@kappasigmabot:matrix.org`, but you should set this explicitly to the bot account that owns `MATRIX_TOKEN`.
 - `RPC_URL`: defaults to `wss://kusama-rpc.polkadot.io/`.
 - `DB_PATH`: defaults to `./society_overrides.db`.
 - `PREFIX`: defaults to `!`.
-- `RUST_LOG`: tracing filter, for example `info` or `element_bot=debug`.
+- `RUST_LOG`: tracing filter, for example `info` or `social_bot=debug`.
+- `X_WEBHOOK_URL`: Make.com webhook URL. Leave unset (or blank) to disable X output entirely. Treat it as a secret — anyone with it can post.
+- `HEALTHCHECK_ADDR`: healthcheck bind address, defaults to `127.0.0.1:8080`.
+
+### Make.com X setup
+
+1. Pick/create the bot's X account.
+2. Create a free Make.com scenario with a **Webhooks → Custom webhook** (instant) trigger.
+3. Add an **X (Twitter) → Create a Post** module, OAuth-connect the X account, and map text to `{{1.text}}`. Activate.
+4. Put the webhook URL in `X_WEBHOOK_URL`. Make runs the integration under its own X API agreement, so no X developer account is needed.
 
 ## Production deployment
 
@@ -122,6 +161,7 @@ Notes:
 - `!info` and `!set_address` are easiest to verify with a known Kusama Society member address.
 - Period transition announcements are only emitted when the live candidate period changes while the bot is running, so that behavior is not practical to fully verify on demand.
 - Manual-test output changes over time because it depends on live chain state.
+- `!countdown` reads `Society.NextIntakeAt`, which does **not** exist in the live Kusama Society pallet (pallet-society 23.0.0); on live chains the command reports "NextIntakeAt is unavailable on chain" instead of crashing. It only works against chains whose metadata still has that storage item (e.g. the e2e fork).
 
 ## Development
 
@@ -153,7 +193,7 @@ The Docker e2e harness starts Chopsticks, a mock Matrix homeserver, the bot, and
 docker compose -f tests/e2e/docker-compose.yml up --build --abort-on-container-exit --exit-code-from e2e
 ```
 
-The default checked-in Chopsticks config is [tests/e2e/kusama.yml](/Users/laurogripa/code/kusama/element-bot/tests/e2e/kusama.yml), copied from `../kappasigmamu.github.io/config/kusama.yml`. That file targets Asset Hub.
+The default checked-in Chopsticks config is [tests/e2e/kusama.yml](tests/e2e/kusama.yml), copied from `../kappasigmamu.github.io/config/kusama.yml`. That file targets Asset Hub.
 
 To run that copied config locally with a pinned fork block and instant block building:
 

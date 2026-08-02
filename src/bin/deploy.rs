@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use std::env;
 use std::process::{Command, ExitCode, Stdio};
 
-const DEFAULT_DEPLOY_DIR: &str = "/opt/element-bot";
+const DEFAULT_DEPLOY_DIR: &str = "/opt/social-bot";
 
 fn main() -> ExitCode {
     match run() {
@@ -51,8 +51,8 @@ mod tests {
     #[test]
     fn builds_remote_update_command() {
         assert_eq!(
-            remote_update_command("/opt/element-bot"),
-            "cd /opt/element-bot && docker compose pull && docker compose up -d"
+            remote_update_command("/opt/social-bot"),
+            "cd /opt/social-bot && docker compose pull && docker compose up -d"
         );
     }
 }

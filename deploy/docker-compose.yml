@@ -1,11 +1,18 @@
 services:
-  element-bot:
-    image: ghcr.io/kappasigmamu/element-bot:latest
+  social-bot:
+    image: ghcr.io/kappasigmamu/social-bot:latest
     restart: unless-stopped
     env_file: .env
+    ports:
+      - "127.0.0.1:8080:8080"
     volumes:
       - ./data:/data
     working_dir: /data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     logging:
       driver: json-file
       options:

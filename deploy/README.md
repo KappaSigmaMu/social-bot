@@ -3,9 +3,9 @@
 Single-droplet deployment using Docker Compose and images built by GitHub Actions to GHCR.
 
 ```
-Push to main → GitHub Actions → ghcr.io/kappasigmamu/element-bot:latest
-                                      ↓
-                              docker compose pull (on droplet)
+Push to main → GitHub Actions → ghcr.io/kappasigmamu/social-bot:latest
+                                       ↓
+                               docker compose pull (on droplet)
 ```
 
 ## Prerequisites
@@ -44,22 +44,22 @@ sudo ufw enable
 ### 4. Set up the app directory
 
 ```bash
-sudo mkdir -p /opt/element-bot/data /opt/element-bot/backups
-sudo chown -R $USER:$USER /opt/element-bot
-cd /opt/element-bot
+sudo mkdir -p /opt/social-bot/data /opt/social-bot/backups
+sudo chown -R $USER:$USER /opt/social-bot
+cd /opt/social-bot
 ```
 
 Copy deploy files from your laptop:
 
 ```bash
-scp deploy/docker-compose.yml deploy/.env.example root@YOUR_DROPLET:/opt/element-bot/
+scp deploy/docker-compose.yml deploy/.env.example root@YOUR_DROPLET:/opt/social-bot/
 ```
 
 If you have an existing override database locally, copy it too:
 
 ```bash
-scp society_overrides.db root@YOUR_DROPLET:/opt/element-bot/data/society_overrides.db
-ssh root@YOUR_DROPLET 'chown 1000:1000 /opt/element-bot/data/society_overrides.db'
+scp society_overrides.db root@YOUR_DROPLET:/opt/social-bot/data/society_overrides.db
+ssh root@YOUR_DROPLET 'chown 1000:1000 /opt/social-bot/data/society_overrides.db'
 ```
 
 Create `.env` from the template:
@@ -74,12 +74,14 @@ Fill in production values:
 ```env
 MATRIX_ROOM=!your-room:matrix.org
 MATRIX_TOKEN=...
-MATRIX_USER_ID=@yourbot:matrix.org
+MATRIX_USER_ID=@kappasigmabot:matrix.org
 MATRIX_HOMESERVER=https://matrix.org
 RPC_URL=wss://kusama-rpc.polkadot.io/
 DB_PATH=/data/society_overrides.db
 PREFIX=!
 RUST_LOG=info
+# X_WEBHOOK_URL=           # Make.com webhook URL; leave unset to disable X
+# HEALTHCHECK_ADDR=127.0.0.1:8080
 ```
 
 Ensure the data directory is writable by the container user (UID 1000):
@@ -88,9 +90,22 @@ Ensure the data directory is writable by the container user (UID 1000):
 chown -R 1000:1000 data
 ```
 
+### Migrating from `/opt/element-bot`
+
+The old deploy directory stays as an archive. To move:
+
+```bash
+sudo mkdir -p /opt/social-bot/data /opt/social-bot/backups
+sudo cp /opt/element-bot/.env /opt/social-bot/.env
+sudo cp /opt/element-bot/data/society_overrides.db /opt/social-bot/data/
+sudo chown -R 1000:1000 /opt/social-bot/data
+```
+
+Update the deploy compose files (they now reference `social-bot`), then start as below. The old `element-bot` container can be stopped/removed once the new one is healthy.
+
 ### 5. Authenticate to GHCR
 
-The image is published to `ghcr.io/kappasigmamu/element-bot`. Create a GitHub personal access token with `read:packages` scope, then:
+The image is published to `ghcr.io/kappasigmamu/social-bot`. Create a GitHub personal access token with `read:packages` scope, then:
 
 ```bash
 echo $GITHUB_PAT | docker login ghcr.io -u YOUR_GITHUB_USER --password-stdin
@@ -104,7 +119,7 @@ Smoke test (sends one Matrix message and exits):
 
 ```bash
 docker compose pull
-docker compose run --rm element-bot --sample
+docker compose run --rm social-bot --sample
 ```
 
 If that succeeds, start the daemon:
@@ -115,6 +130,20 @@ docker compose logs -f --tail=50
 ```
 
 Send `!ping` in the Matrix room to confirm the bot is live.
+
+## Healthcheck
+
+`deploy/docker-compose.yml` publishes the healthcheck port and Docker checks it every 30 s via `curl`. Confirm it is reachable on the droplet:
+
+```bash
+curl -fsS http://127.0.0.1:8080/health
+```
+
+The compose healthcheck also keeps `docker compose ps` informative:
+
+```bash
+docker compose ps
+```
 
 ## Updates
 
@@ -128,7 +157,7 @@ Add to your local `.env`:
 
 ```env
 DEPLOY_HOST=root@your-droplet-ip
-# DEPLOY_DIR=/opt/element-bot   # optional, this is the default
+# DEPLOY_DIR=/opt/social-bot   # optional, this is the default
 ```
 
 This SSHes into the droplet and runs `docker compose pull && docker compose up -d`.
@@ -136,7 +165,7 @@ This SSHes into the droplet and runs `docker compose pull && docker compose up -
 Or manually on the droplet:
 
 ```bash
-cd /opt/element-bot
+cd /opt/social-bot
 docker compose pull && docker compose up -d
 ```
 
@@ -146,9 +175,10 @@ SQLite overrides and logs in `./data/` survive restarts and image updates.
 
 | Check | Command |
 |-------|---------|
-| Container running | `docker compose ps` |
+| Container running / health | `docker compose ps` |
 | Recent logs | `docker compose logs -f --tail=100` |
 | Functional probe | Send `!ping` in the Matrix room |
+| HTTP healthcheck | `curl -fsS http://127.0.0.1:8080/health` |
 
 Watch for repeated `sync failed; retrying` or `RPC connection failed` in logs.
 
@@ -163,10 +193,10 @@ crontab -e
 Add:
 
 ```
-0 3 * * * cp /opt/element-bot/data/society_overrides.db /opt/element-bot/backups/$(date +\%F).db
+0 3 * * * cp /opt/social-bot/data/society_overrides.db /opt/social-bot/backups/$(date +\%F).db
 ```
 
-Bot logs also roll daily into `/opt/element-bot/data/logs/`.
+Bot logs also roll daily into `/opt/social-bot/data/logs/`.
 
 ## Troubleshooting
 
@@ -175,22 +205,23 @@ Bot logs also roll daily into `/opt/element-bot/data/logs/`.
 The container runs as UID 1000. Fix ownership:
 
 ```bash
-chown -R 1000:1000 /opt/element-bot/data
+chown -R 1000:1000 /opt/social-bot/data
 ```
 
 **Image pull fails**
 
-Confirm GitHub Actions completed on `main` and the package exists at `ghcr.io/kappasigmamu/element-bot`. Re-run `docker login ghcr.io` if the PAT expired.
+Confirm GitHub Actions completed on `main` and the package exists at `ghcr.io/kappasigmamu/social-bot`. Re-run `docker login ghcr.io` if the PAT expired.
 
 **Bot does not respond**
 
 - Confirm the bot account is joined to `MATRIX_ROOM`.
 - Verify `MATRIX_TOKEN` is valid and matches `MATRIX_USER_ID`.
-- Check logs: `docker compose logs element-bot`.
+- Check logs: `docker compose logs social-bot`.
 
-**Duplicate bid/unbid announcements after restart**
+**Healthcheck says unhealthy**
 
-Expected — in-memory dedupe resets on restart. This is a known limitation, not a deployment issue.
+- Confirm `HEALTHCHECK_ADDR` is reachable inside the container; the compose file publishes port 8080 and the healthcheck uses `curl` (installed in the runtime image).
+- If X posts are failing, check logs for `X webhook post failed` — this never affects Matrix output.
 
 ## What not to do
 

@@ -97,6 +97,37 @@ pub struct Bid {
 pub enum SocietyEventKind {
     Bid,
     Unbid,
+    Vouch,
+    Unvouch,
+    AutoUnbid,
+    Inducted,
+    Challenged,
+    CandidateSuspended,
+    MemberSuspended,
+    SuspendedMemberJudgement,
+    Elevated,
+    Vote,
+    DefenderVote,
+}
+
+impl SocietyEventKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Bid => "Bid",
+            Self::Unbid => "Unbid",
+            Self::Vouch => "Vouch",
+            Self::Unvouch => "Unvouch",
+            Self::AutoUnbid => "AutoUnbid",
+            Self::Inducted => "Inducted",
+            Self::Challenged => "Challenged",
+            Self::CandidateSuspended => "CandidateSuspended",
+            Self::MemberSuspended => "MemberSuspended",
+            Self::SuspendedMemberJudgement => "SuspendedMemberJudgement",
+            Self::Elevated => "Elevated",
+            Self::Vote => "Vote",
+            Self::DefenderVote => "DefenderVote",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -104,6 +135,17 @@ pub struct SocietyEventId {
     pub block_hash: [u8; 32],
     pub event_index: u32,
     pub kind: SocietyEventKind,
+}
+
+impl SocietyEventId {
+    /// Stable storage key: hex block hash + event index + kind name.
+    pub fn event_key(&self) -> (String, u32, &'static str) {
+        (
+            hex::encode(self.block_hash),
+            self.event_index,
+            self.kind.as_str(),
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -119,39 +161,88 @@ pub enum SocietyEvent {
         block_number: u64,
         address: String,
     },
+    Vouch {
+        id: SocietyEventId,
+        block_number: u64,
+        candidate: String,
+        offer_plancks: u128,
+        voucher: String,
+    },
+    Unvouch {
+        id: SocietyEventId,
+        block_number: u64,
+        candidate: String,
+    },
+    AutoUnbid {
+        id: SocietyEventId,
+        block_number: u64,
+        candidate: String,
+    },
+    Inducted {
+        id: SocietyEventId,
+        block_number: u64,
+        primary: String,
+        candidates: Vec<String>,
+    },
+    Challenged {
+        id: SocietyEventId,
+        block_number: u64,
+        member: String,
+    },
+    CandidateSuspended {
+        id: SocietyEventId,
+        block_number: u64,
+        candidate: String,
+    },
+    MemberSuspended {
+        id: SocietyEventId,
+        block_number: u64,
+        member: String,
+    },
+    SuspendedMemberJudgement {
+        id: SocietyEventId,
+        block_number: u64,
+        who: String,
+        judged: bool,
+    },
+    Elevated {
+        id: SocietyEventId,
+        block_number: u64,
+        member: String,
+        rank: u64,
+    },
+    Vote {
+        id: SocietyEventId,
+        block_number: u64,
+        candidate: String,
+        voter: String,
+        approve: bool,
+    },
+    DefenderVote {
+        id: SocietyEventId,
+        block_number: u64,
+        voter: String,
+        approve: bool,
+    },
 }
 
 impl SocietyEvent {
     pub fn id(&self) -> &SocietyEventId {
         match self {
-            Self::Bid { id, .. } | Self::Unbid { id, .. } => id,
+            Self::Bid { id, .. }
+            | Self::Unbid { id, .. }
+            | Self::Vouch { id, .. }
+            | Self::Unvouch { id, .. }
+            | Self::AutoUnbid { id, .. }
+            | Self::Inducted { id, .. }
+            | Self::Challenged { id, .. }
+            | Self::CandidateSuspended { id, .. }
+            | Self::MemberSuspended { id, .. }
+            | Self::SuspendedMemberJudgement { id, .. }
+            | Self::Elevated { id, .. }
+            | Self::Vote { id, .. }
+            | Self::DefenderVote { id, .. } => id,
         }
-    }
-}
-
-pub struct SeenSocietyEvents {
-    seen: std::sync::Mutex<std::collections::HashSet<SocietyEventId>>,
-}
-
-impl SeenSocietyEvents {
-    pub fn new() -> Self {
-        Self {
-            seen: std::sync::Mutex::new(std::collections::HashSet::new()),
-        }
-    }
-
-    /// Returns `true` when this event has not been announced yet.
-    pub fn mark_seen(&self, id: &SocietyEventId) -> bool {
-        self.seen
-            .lock()
-            .expect("seen society events lock poisoned")
-            .insert(id.clone())
-    }
-}
-
-impl Default for SeenSocietyEvents {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

@@ -1,8 +1,8 @@
 [package]
-name = "element-bot"
+name = "social-bot"
 version = "0.1.0"
 edition = "2024"
-default-run = "element-bot"
+default-run = "social-bot"
 
 [dependencies]
 anyhow = "1"

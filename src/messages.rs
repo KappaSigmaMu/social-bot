@@ -122,8 +122,7 @@ pub fn intake_countdown_message(blocks_remaining: u64, next_intake_at: u64) -> S
         return format!("Next intake is due now (at block {next_intake_at})");
     }
 
-    let duration =
-        Duration::from_secs(blocks_remaining * CandidatePeriod::SECONDS_PER_BLOCK);
+    let duration = Duration::from_secs(blocks_remaining * CandidatePeriod::SECONDS_PER_BLOCK);
     format!(
         "Next intake in {} (at block {next_intake_at})",
         format_readable_countdown(duration)
@@ -178,6 +177,139 @@ pub fn unbid_message(block_number: u64, address_or_handle: &str) -> String {
     format!("**Withdrawn bid** (block {block_number})\n· `{address_or_handle}`\n")
 }
 
+pub fn claim_started_message(
+    candidate_period: &CandidatePeriod,
+    candidates: &[Candidate],
+) -> String {
+    let mut message = format!(
+        "**Voting ended — claim period started**\nCandidates with a clear majority may claim membership.\n{} blocks remaining ({}).\n\n",
+        candidate_period.claim_blocks_left,
+        format_duration(candidate_period.claim_time_left()),
+    );
+    message.push_str(&candidates_message(candidates));
+    message
+}
+
+pub fn vouch_message(
+    block_number: u64,
+    candidate: &str,
+    voucher: &str,
+    offer_plancks: u128,
+) -> String {
+    format!(
+        "**Vouch** (block {block_number}) — {voucher} vouches for {candidate} with {} KSM",
+        format_ksm(offer_plancks)
+    )
+}
+
+pub fn unvouch_message(block_number: u64, candidate: &str) -> String {
+    format!("**Unvouch** (block {block_number}) — {candidate} is no longer vouched for")
+}
+
+pub fn auto_unbid_message(block_number: u64, candidate: &str) -> String {
+    format!("**Auto unbid** (block {block_number}) — {candidate} dropped (excess bids)")
+}
+
+pub fn inducted_message(block_number: u64, primary: &str, candidates: &[String]) -> String {
+    let mut message = format!(
+        "**Inducted** (block {block_number}) — {} new member(s); new head: {primary}",
+        candidates.len()
+    );
+    if !candidates.is_empty() {
+        message.push_str("\n· ");
+        message.push_str(&candidates.join("\n· "));
+    }
+    message
+}
+
+pub fn challenged_message(block_number: u64, member: &str) -> String {
+    format!("**Challenged** (block {block_number}) — {member} challenged; defender vote is on")
+}
+
+pub fn candidate_suspended_message(block_number: u64, candidate: &str) -> String {
+    format!("**Candidate suspended** (block {block_number}) — {candidate}")
+}
+
+pub fn member_suspended_message(block_number: u64, member: &str) -> String {
+    format!("**Member suspended** (block {block_number}) — {member}")
+}
+
+pub fn suspended_member_judgement_message(block_number: u64, who: &str, judged: bool) -> String {
+    let verdict = if judged { "forgiven" } else { "convicted" };
+    format!("**Judgement** (block {block_number}) — {who} {verdict}")
+}
+
+pub fn elevated_message(block_number: u64, member: &str, rank: u64) -> String {
+    format!("**Elevated** (block {block_number}) — {member} elevated to rank {rank}")
+}
+
+pub fn vote_message(block_number: u64, voter: &str, approve: bool, candidate: &str) -> String {
+    let verdict = if approve { "approved" } else { "rejected" };
+    format!("**Vote** (block {block_number}) — {voter} {verdict} candidate {candidate}")
+}
+
+pub fn defender_vote_message(
+    block_number: u64,
+    voter: &str,
+    approve: bool,
+    defender: &str,
+) -> String {
+    let verdict = if approve { "approved" } else { "rejected" };
+    format!("**Defender vote** (block {block_number}) — {voter} {verdict} defender {defender}")
+}
+
+pub fn x_round_start_message(
+    block_number: u64,
+    candidate_count: usize,
+    duration: Duration,
+) -> String {
+    format!(
+        "New Kusama Society voting period started (block {block_number}). {candidate_count} candidate(s), ~{} to vote.",
+        format_duration_short(duration)
+    )
+}
+
+pub fn x_claim_start_message(block_number: u64) -> String {
+    format!(
+        "Kusama Society claim period started (block {block_number}). Candidates with a clear majority may claim membership."
+    )
+}
+
+pub fn x_bid_message(block_number: u64, display: &str, bid_plancks: u128) -> String {
+    format!(
+        "New Kusama Society bid (block {block_number}): {display} — {} KSM",
+        format_ksm(bid_plancks)
+    )
+}
+
+pub fn x_unbid_message(block_number: u64, display: &str) -> String {
+    format!("Kusama Society bid withdrawn (block {block_number}): {display}")
+}
+
+pub fn x_vouch_message(
+    block_number: u64,
+    voucher: &str,
+    candidate: &str,
+    offer_plancks: u128,
+) -> String {
+    format!(
+        "New Kusama Society vouch (block {block_number}): {voucher} vouches for {candidate} — {} KSM",
+        format_ksm(offer_plancks)
+    )
+}
+
+pub fn x_inducted_message(block_number: u64, count: usize, primary_display: &str) -> String {
+    format!(
+        "Kusama Society inducted {count} new member(s) (block {block_number}). New head: {primary_display}"
+    )
+}
+
+pub fn x_challenged_message(block_number: u64, display: &str) -> String {
+    format!(
+        "Kusama Society member challenged (block {block_number}): {display} — defender vote is on."
+    )
+}
+
 fn candidate_line(candidate: &Candidate) -> String {
     format!(
         "· `{}` — {} KSM · {} approvals · {} rejections\n",
@@ -218,6 +350,28 @@ fn format_ksm(plancks: u128) -> String {
     } else {
         let fraction = format!("{fraction:012}");
         format!("{whole}.{}", fraction.trim_end_matches('0'))
+    }
+}
+
+fn format_duration_short(duration: Duration) -> String {
+    let total = duration.as_secs();
+    let days = total / 86_400;
+    let hours = total % 86_400 / 3_600;
+    let minutes = total % 3_600 / 60;
+    if days > 0 {
+        if hours > 0 {
+            format!("{days}d {hours}h")
+        } else {
+            format!("{days}d")
+        }
+    } else if hours > 0 {
+        if minutes > 0 {
+            format!("{hours}h {minutes}m")
+        } else {
+            format!("{hours}h")
+        }
+    } else {
+        format!("{minutes}m")
     }
 }
 
@@ -439,5 +593,146 @@ mod tests {
 
         assert!(message.contains("· Status: member"));
         assert!(!message.contains("Roles"));
+    }
+
+    #[test]
+    fn renders_claim_started_message_with_candidate_tallies() {
+        let period = CandidatePeriod::from_block(CandidatePeriod::VOTE_PERIOD_BLOCKS);
+        let candidates = vec![
+            Candidate {
+                address_or_handle: "candidate-a".to_owned(),
+                bid_plancks: 1_000_000_000_000,
+                tally: Tally {
+                    approvals: 2,
+                    rejections: 0,
+                },
+            },
+            Candidate {
+                address_or_handle: "candidate-b".to_owned(),
+                bid_plancks: 2_000_000_000_000,
+                tally: Tally {
+                    approvals: 0,
+                    rejections: 3,
+                },
+            },
+        ];
+        let message = claim_started_message(&period, &candidates);
+
+        assert!(message.contains("**Voting ended — claim period started**"));
+        assert!(message.contains("**Candidates**"));
+        assert!(message.contains("· `candidate-a` — 1 KSM · 2 approvals · 0 rejections"));
+        assert!(message.contains("· `candidate-b` — 2 KSM · 0 approvals · 3 rejections"));
+    }
+
+    #[test]
+    fn renders_thread_event_messages() {
+        assert_eq!(
+            vouch_message(1, "candidate-a", "voucher-b", 1_500_000_000_000),
+            "**Vouch** (block 1) — voucher-b vouches for candidate-a with 1.5 KSM"
+        );
+        assert_eq!(
+            unvouch_message(2, "candidate-a"),
+            "**Unvouch** (block 2) — candidate-a is no longer vouched for"
+        );
+        assert_eq!(
+            auto_unbid_message(3, "candidate-a"),
+            "**Auto unbid** (block 3) — candidate-a dropped (excess bids)"
+        );
+        assert_eq!(
+            inducted_message(
+                4,
+                "primary-a",
+                &["candidate-a".to_owned(), "candidate-b".to_owned()]
+            ),
+            "**Inducted** (block 4) — 2 new member(s); new head: primary-a\n· candidate-a\n· candidate-b"
+        );
+        assert_eq!(
+            challenged_message(5, "member-a"),
+            "**Challenged** (block 5) — member-a challenged; defender vote is on"
+        );
+        assert_eq!(
+            candidate_suspended_message(6, "candidate-a"),
+            "**Candidate suspended** (block 6) — candidate-a"
+        );
+        assert_eq!(
+            member_suspended_message(7, "member-a"),
+            "**Member suspended** (block 7) — member-a"
+        );
+        assert_eq!(
+            suspended_member_judgement_message(8, "who-a", true),
+            "**Judgement** (block 8) — who-a forgiven"
+        );
+        assert_eq!(
+            suspended_member_judgement_message(8, "who-a", false),
+            "**Judgement** (block 8) — who-a convicted"
+        );
+        assert_eq!(
+            elevated_message(9, "member-a", 2),
+            "**Elevated** (block 9) — member-a elevated to rank 2"
+        );
+        assert_eq!(
+            vote_message(10, "voter-a", true, "candidate-a"),
+            "**Vote** (block 10) — voter-a approved candidate candidate-a"
+        );
+        assert_eq!(
+            vote_message(10, "voter-a", false, "candidate-a"),
+            "**Vote** (block 10) — voter-a rejected candidate candidate-a"
+        );
+        assert_eq!(
+            defender_vote_message(11, "voter-a", true, "defender-a"),
+            "**Defender vote** (block 11) — voter-a approved defender defender-a"
+        );
+    }
+
+    #[test]
+    fn x_messages_stay_within_twitter_limit() {
+        let long_display = "Qm".repeat(60);
+        let messages = vec![
+            x_round_start_message(123_456, 3, Duration::from_secs(4 * 86_400)),
+            x_claim_start_message(123_456),
+            x_bid_message(123_456, &long_display, 350_000_000_000_000),
+            x_unbid_message(123_456, &long_display),
+            x_vouch_message(123_456, &long_display, "candidate", 350_000_000_000_000),
+            x_inducted_message(123_456, 5, &long_display),
+            x_challenged_message(123_456, &long_display),
+        ];
+        for message in messages {
+            assert!(
+                message.chars().count() <= 280,
+                "X message exceeds 280 chars: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn renders_x_messages() {
+        assert_eq!(
+            x_round_start_message(123_456, 3, Duration::from_secs(4 * 86_400 + 2 * 3_600)),
+            "New Kusama Society voting period started (block 123456). 3 candidate(s), ~4d 2h to vote."
+        );
+        assert_eq!(
+            x_claim_start_message(123_456),
+            "Kusama Society claim period started (block 123456). Candidates with a clear majority may claim membership."
+        );
+        assert_eq!(
+            x_bid_message(123_456, "Alice", 350_000_000_000_000),
+            "New Kusama Society bid (block 123456): Alice — 350 KSM"
+        );
+        assert_eq!(
+            x_unbid_message(123_456, "Alice"),
+            "Kusama Society bid withdrawn (block 123456): Alice"
+        );
+        assert_eq!(
+            x_vouch_message(123_456, "Bob", "Alice", 350_000_000_000_000),
+            "New Kusama Society vouch (block 123456): Bob vouches for Alice — 350 KSM"
+        );
+        assert_eq!(
+            x_inducted_message(123_456, 3, "Alice"),
+            "Kusama Society inducted 3 new member(s) (block 123456). New head: Alice"
+        );
+        assert_eq!(
+            x_challenged_message(123_456, "Alice"),
+            "Kusama Society member challenged (block 123456): Alice — defender vote is on."
+        );
     }
 }

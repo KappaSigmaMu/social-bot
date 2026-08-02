@@ -815,32 +815,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
 
 [[package]]
-name = "element-bot"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "blake2",
- "bs58",
- "dotenvy",
- "futures",
- "hex",
- "regex",
- "reqwest",
- "rusqlite",
- "serde",
- "serde_json",
- "subxt",
- "subxt-rpcs",
- "subxt-signer",
- "tempfile",
- "tokio",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3140,6 +3114,32 @@ dependencies = [
  "smol",
  "smoldot",
  "zeroize",
+]
+
+[[package]]
+name = "social-bot"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "blake2",
+ "bs58",
+ "dotenvy",
+ "futures",
+ "hex",
+ "regex",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "subxt",
+ "subxt-rpcs",
+ "subxt-signer",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
 ]
 
 [[package]]

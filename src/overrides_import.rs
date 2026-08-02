@@ -248,7 +248,7 @@ mod tests {
 
     const MEMBER: &str = "FUfBKr2pDxKrxmExGp4hjU6St4BDgffzKcyAqv6pruGnez1";
     const USER: &str = "@alice:parity.io";
-    const BOT: &str = "@societybot:matrix.org";
+    const BOT: &str = "@kappasigmabot:matrix.org";
 
     fn test_store() -> OverrideStore {
         let file = NamedTempFile::new().unwrap();
@@ -346,9 +346,8 @@ mod tests {
             Some((USER.to_owned(), MEMBER.to_owned()))
         );
 
-        let with_handle = format!(
-            "**Member**\n· Address: `{MEMBER} ({USER})`\n· Status: member\n· Strikes: 0"
-        );
+        let with_handle =
+            format!("**Member**\n· Address: `{MEMBER} ({USER})`\n· Status: member\n· Strikes: 0");
         assert_eq!(
             parse_member_override_from_response(&with_handle),
             Some((USER.to_owned(), MEMBER.to_owned()))
@@ -382,7 +381,9 @@ mod tests {
                 },
                 HistoryMessage {
                     sender: BOT.to_owned(),
-                    body: format!("**Member**\n· Address: `{MEMBER}`\n· Status: member\n· Strikes: 0"),
+                    body: format!(
+                        "**Member**\n· Address: `{MEMBER}`\n· Status: member\n· Strikes: 0"
+                    ),
                     origin_server_ts: 1_500,
                 },
             ],

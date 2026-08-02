@@ -38,6 +38,7 @@ pub trait ChainData: Send + Sync {
     async fn relay_block_number(&self) -> Result<u64>;
     async fn next_intake_at(&self) -> Result<Option<u64>>;
     async fn identity_matrix_handle(&self, address: &str) -> Result<Option<String>>;
+    async fn identity_display_name(&self, address: &str) -> Result<Option<String>>;
 }
 
 pub struct Society<C> {
@@ -49,11 +50,12 @@ impl<C> Society<C>
 where
     C: ChainData,
 {
-    pub fn new(chain: C, store: OverrideStore) -> Self {
-        Self {
-            chain,
-            store: Arc::new(Mutex::new(store)),
-        }
+    pub fn new(chain: C, store: Arc<Mutex<OverrideStore>>) -> Self {
+        Self { chain, store }
+    }
+
+    pub fn store(&self) -> Arc<Mutex<OverrideStore>> {
+        self.store.clone()
     }
 
     pub fn set_matrix_handle(&self, address: &str, matrix_handle: &str) -> Result<bool> {
@@ -165,6 +167,10 @@ where
         ))
     }
 
+    pub async fn get_relay_block_number(&self) -> Result<u64> {
+        self.chain.relay_block_number().await
+    }
+
     pub async fn get_block_number(&self) -> Result<u64> {
         self.chain.block_number().await
     }
@@ -188,6 +194,18 @@ where
             Some(address) => Ok(Some(self.format_account_display(&address).await?)),
             None => Ok(None),
         }
+    }
+
+    /// Renders an account preferring the on-chain identity: `Display Name (@handle)`,
+    /// then bare `Display Name`, then the raw address.
+    pub async fn format_display_name(&self, address: &str) -> Result<String> {
+        let display = self.chain.identity_display_name(address).await?;
+        let handle = self.get_matrix_handle(address).await?;
+        Ok(match (display, handle) {
+            (Some(display), Some(handle)) => format!("{display} ({handle})"),
+            (Some(display), None) => display,
+            (None, _) => address.to_owned(),
+        })
     }
 
     async fn is_member(&self, address: &str) -> Result<bool> {
@@ -546,11 +564,15 @@ impl ChainData for SubxtKusama {
     }
 
     async fn next_intake_at(&self) -> Result<Option<u64>> {
-        Ok(self
-            .fetch("Society", "NextIntakeAt")
-            .await?
-            .and_then(|value| value.as_u128())
-            .and_then(|value| u64::try_from(value).ok()))
+        match self.fetch("Society", "NextIntakeAt").await {
+            Ok(value) => Ok(value
+                .and_then(|value| value.as_u128())
+                .and_then(|value| u64::try_from(value).ok())),
+            Err(error) if is_missing_storage_metadata(&error, "Society", "NextIntakeAt") => {
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     async fn identity_matrix_handle(&self, address: &str) -> Result<Option<String>> {
@@ -567,6 +589,21 @@ impl ChainData for SubxtKusama {
         let json = value_to_json(value)?;
         Ok(find_riot_raw(&json))
     }
+
+    async fn identity_display_name(&self, address: &str) -> Result<Option<String>> {
+        let value = match self.fetch_keyed("Identity", "IdentityOf", address).await {
+            Ok(value) => value,
+            Err(error) if is_missing_storage_metadata(&error, "Identity", "IdentityOf") => {
+                return Ok(None);
+            }
+            Err(error) => return Err(error),
+        };
+        let Some(value) = value else {
+            return Ok(None);
+        };
+        let json = value_to_json(value)?;
+        Ok(find_display_raw(&json))
+    }
 }
 
 fn parse_society_event(
@@ -576,32 +613,94 @@ fn parse_society_event(
     event_name: &str,
     json: &JsonValue,
 ) -> Option<SocietyEvent> {
+    let id = |kind| SocietyEventId {
+        block_hash,
+        event_index,
+        kind,
+    };
+    let account = |key: &str| {
+        find_account_by_key(json, key)
+            .map(|account| encode_account_id(&account, KUSAMA_SS58_PREFIX))
+    };
+
     match event_name {
-        "Bid" => {
-            let account = find_account_ids(json).into_iter().next()?;
-            Some(SocietyEvent::Bid {
-                id: SocietyEventId {
-                    block_hash,
-                    event_index,
-                    kind: SocietyEventKind::Bid,
-                },
-                block_number,
-                address: encode_account_id(&account, KUSAMA_SS58_PREFIX),
-                bid_plancks: find_u128_by_key(json, "offer").unwrap_or_default(),
-            })
-        }
-        "Unbid" => {
-            let account = find_account_ids(json).into_iter().next()?;
-            Some(SocietyEvent::Unbid {
-                id: SocietyEventId {
-                    block_hash,
-                    event_index,
-                    kind: SocietyEventKind::Unbid,
-                },
-                block_number,
-                address: encode_account_id(&account, KUSAMA_SS58_PREFIX),
-            })
-        }
+        "Bid" => Some(SocietyEvent::Bid {
+            id: id(SocietyEventKind::Bid),
+            block_number,
+            address: account("candidate_id")?,
+            bid_plancks: find_u128_by_key(json, "offer").unwrap_or_default(),
+        }),
+        "Unbid" => Some(SocietyEvent::Unbid {
+            id: id(SocietyEventKind::Unbid),
+            block_number,
+            address: account("candidate")?,
+        }),
+        "Vouch" => Some(SocietyEvent::Vouch {
+            id: id(SocietyEventKind::Vouch),
+            block_number,
+            candidate: account("candidate_id")?,
+            offer_plancks: find_u128_by_key(json, "offer").unwrap_or_default(),
+            voucher: account("vouching")?,
+        }),
+        "Unvouch" => Some(SocietyEvent::Unvouch {
+            id: id(SocietyEventKind::Unvouch),
+            block_number,
+            candidate: account("candidate")?,
+        }),
+        "AutoUnbid" => Some(SocietyEvent::AutoUnbid {
+            id: id(SocietyEventKind::AutoUnbid),
+            block_number,
+            candidate: account("candidate")?,
+        }),
+        "Inducted" => Some(SocietyEvent::Inducted {
+            id: id(SocietyEventKind::Inducted),
+            block_number,
+            primary: account("primary")?,
+            candidates: find_accounts_by_key(json, "candidates")
+                .into_iter()
+                .map(|account| encode_account_id(&account, KUSAMA_SS58_PREFIX))
+                .collect(),
+        }),
+        "Challenged" => Some(SocietyEvent::Challenged {
+            id: id(SocietyEventKind::Challenged),
+            block_number,
+            member: account("member")?,
+        }),
+        "CandidateSuspended" => Some(SocietyEvent::CandidateSuspended {
+            id: id(SocietyEventKind::CandidateSuspended),
+            block_number,
+            candidate: account("candidate")?,
+        }),
+        "MemberSuspended" => Some(SocietyEvent::MemberSuspended {
+            id: id(SocietyEventKind::MemberSuspended),
+            block_number,
+            member: account("member")?,
+        }),
+        "SuspendedMemberJudgement" => Some(SocietyEvent::SuspendedMemberJudgement {
+            id: id(SocietyEventKind::SuspendedMemberJudgement),
+            block_number,
+            who: account("who")?,
+            judged: find_bool_by_key(json, "judged").unwrap_or_default(),
+        }),
+        "Elevated" => Some(SocietyEvent::Elevated {
+            id: id(SocietyEventKind::Elevated),
+            block_number,
+            member: account("member")?,
+            rank: find_u64_by_key(json, "rank").unwrap_or_default(),
+        }),
+        "Vote" => Some(SocietyEvent::Vote {
+            id: id(SocietyEventKind::Vote),
+            block_number,
+            candidate: account("candidate")?,
+            voter: account("voter")?,
+            approve: find_bool_by_key(json, "vote").unwrap_or_default(),
+        }),
+        "DefenderVote" => Some(SocietyEvent::DefenderVote {
+            id: id(SocietyEventKind::DefenderVote),
+            block_number,
+            voter: account("voter")?,
+            approve: find_bool_by_key(json, "vote").unwrap_or_default(),
+        }),
         _ => None,
     }
 }
@@ -678,6 +777,57 @@ fn find_account_ids(value: &JsonValue) -> Vec<[u8; 32]> {
     out
 }
 
+fn find_account_by_key(value: &JsonValue, key: &str) -> Option<[u8; 32]> {
+    match value {
+        JsonValue::Object(map) => {
+            if let Some(child) = map.get(key) {
+                return find_account_ids(child).into_iter().next();
+            }
+            map.values()
+                .find_map(|child| find_account_by_key(child, key))
+        }
+        JsonValue::Array(items) => items
+            .iter()
+            .find_map(|child| find_account_by_key(child, key)),
+        _ => None,
+    }
+}
+
+fn find_accounts_by_key(value: &JsonValue, key: &str) -> Vec<[u8; 32]> {
+    match value {
+        JsonValue::Object(map) => {
+            if let Some(child) = map.get(key) {
+                return find_account_ids(child);
+            }
+            for child in map.values() {
+                let found = find_accounts_by_key(child, key);
+                if !found.is_empty() {
+                    return found;
+                }
+            }
+            Vec::new()
+        }
+        JsonValue::Array(items) => items
+            .iter()
+            .flat_map(|child| find_accounts_by_key(child, key))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn find_bool_by_key(value: &JsonValue, key: &str) -> Option<bool> {
+    match value {
+        JsonValue::Object(map) => {
+            if let Some(found) = map.get(key).and_then(JsonValue::as_bool) {
+                return Some(found);
+            }
+            map.values().find_map(|child| find_bool_by_key(child, key))
+        }
+        JsonValue::Array(items) => items.iter().find_map(|child| find_bool_by_key(child, key)),
+        _ => None,
+    }
+}
+
 fn collect_account_ids(value: &JsonValue, out: &mut Vec<[u8; 32]>) {
     match value {
         JsonValue::Array(items) if items.len() == 32 && items.iter().all(JsonValue::is_number) => {
@@ -705,14 +855,25 @@ fn collect_account_ids(value: &JsonValue, out: &mut Vec<[u8; 32]>) {
 }
 
 fn find_riot_raw(value: &JsonValue) -> Option<String> {
+    find_identity_field(value, "riot")
+}
+
+fn find_display_raw(value: &JsonValue) -> Option<String> {
+    find_identity_field(value, "display")
+}
+
+fn find_identity_field(value: &JsonValue, field: &str) -> Option<String> {
     match value {
         JsonValue::Object(map) => {
-            if let Some(riot) = map.get("riot") {
-                return find_raw_string(riot);
+            if let Some(child) = map.get(field) {
+                return find_raw_string(child);
             }
-            map.values().find_map(find_riot_raw)
+            map.values()
+                .find_map(|child| find_identity_field(child, field))
         }
-        JsonValue::Array(items) => items.iter().find_map(find_riot_raw),
+        JsonValue::Array(items) => items
+            .iter()
+            .find_map(|child| find_identity_field(child, field)),
         _ => None,
     }
 }
@@ -752,6 +913,7 @@ pub mod tests {
         pub relay_block_number: u64,
         pub next_intake_at: Option<u64>,
         pub identities: HashMap<String, String>,
+        pub identities_display: HashMap<String, String>,
     }
 
     #[async_trait]
@@ -814,6 +976,10 @@ pub mod tests {
         async fn identity_matrix_handle(&self, address: &str) -> Result<Option<String>> {
             Ok(self.identities.get(address).cloned())
         }
+
+        async fn identity_display_name(&self, address: &str) -> Result<Option<String>> {
+            Ok(self.identities_display.get(address).cloned())
+        }
     }
 
     const MEMBER: &str = "FUfBKr2pDxKrxmExGp4hjU6St4BDgffzKcyAqv6pruGnez1";
@@ -825,6 +991,10 @@ pub mod tests {
         let file = tempfile::NamedTempFile::new().unwrap();
         let path = file.into_temp_path().keep().unwrap();
         OverrideStore::open(path).unwrap()
+    }
+
+    fn test_society(chain: FakeChain) -> Society<FakeChain> {
+        Society::new(chain, Arc::new(Mutex::new(test_store())))
     }
 
     #[tokio::test]
@@ -847,7 +1017,7 @@ pub mod tests {
             .identities
             .insert(MEMBER.to_owned(), "@member:matrix.org".to_owned());
 
-        let society = Society::new(chain, test_store());
+        let society = Society::new(chain, Arc::new(Mutex::new(test_store())));
 
         assert_eq!(
             society.get_member_state(MEMBER).await.unwrap(),
@@ -886,7 +1056,7 @@ pub mod tests {
         chain.candidate_skeptic = Some(MEMBER.to_owned());
         chain.defender = Some(MEMBER.to_owned());
         chain.defender_skeptic = Some(MEMBER.to_owned());
-        let society = Society::new(chain, test_store());
+        let society = Society::new(chain, Arc::new(Mutex::new(test_store())));
 
         assert!(
             society
@@ -937,7 +1107,7 @@ pub mod tests {
             relay_block_number: 72_001,
             ..Default::default()
         };
-        let society = Society::new(chain, test_store());
+        let society = Society::new(chain, Arc::new(Mutex::new(test_store())));
         let period = society.get_candidate_period().await.unwrap();
         assert_eq!(period.kind, CandidatePeriodKind::Claim);
         assert_eq!(period.voting_blocks_left, 0);
@@ -946,7 +1116,7 @@ pub mod tests {
             relay_block_number: 100_799,
             ..Default::default()
         };
-        let society = Society::new(chain, test_store());
+        let society = Society::new(chain, Arc::new(Mutex::new(test_store())));
         assert_eq!(
             society
                 .get_candidate_period()
@@ -989,7 +1159,7 @@ pub mod tests {
     fn parses_society_bid_and_unbid_events() {
         let account = [7u8; 32];
         let block_hash = [9u8; 32];
-        let json = serde_json::json!({"who": account, "offer": "5000000000000"});
+        let json = serde_json::json!({"candidate_id": account, "offer": "5000000000000"});
 
         let bid = parse_society_event(42, block_hash, 3, "Bid", &json).unwrap();
         assert!(matches!(
@@ -1008,7 +1178,7 @@ pub mod tests {
             block_hash,
             4,
             "Unbid",
-            &serde_json::json!({"who": account}),
+            &serde_json::json!({"candidate": account}),
         )
         .unwrap();
         assert!(matches!(
@@ -1021,6 +1191,257 @@ pub mod tests {
         assert_eq!(unbid.id().event_index, 4);
         assert_eq!(unbid.id().kind, SocietyEventKind::Unbid);
         assert!(parse_society_event(42, block_hash, 5, "Voted", &json).is_none());
+        assert!(parse_society_event(42, block_hash, 6, "Founded", &json).is_none());
+    }
+
+    fn account_json(byte: u8) -> [u8; 32] {
+        [byte; 32]
+    }
+
+    fn encoded(byte: u8) -> String {
+        encode_account_id(&[byte; 32], KUSAMA_SS58_PREFIX)
+    }
+
+    #[test]
+    fn parses_vouch_unvouch_and_auto_unbid_events() {
+        let block_hash = [1u8; 32];
+        let candidate = account_json(10);
+        let voucher = account_json(20);
+
+        let vouch = parse_society_event(
+            1,
+            block_hash,
+            0,
+            "Vouch",
+            &serde_json::json!({
+                "candidate_id": candidate,
+                "offer": "7500000000000",
+                "vouching": voucher,
+            }),
+        )
+        .unwrap();
+        assert!(matches!(
+            vouch,
+            SocietyEvent::Vouch {
+                candidate: _,
+                offer_plancks: 7_500_000_000_000,
+                voucher: _,
+                ..
+            }
+        ));
+        assert_eq!(vouch.id().kind, SocietyEventKind::Vouch);
+
+        let unvouch = parse_society_event(
+            2,
+            block_hash,
+            1,
+            "Unvouch",
+            &serde_json::json!({"candidate": candidate}),
+        )
+        .unwrap();
+        assert!(matches!(
+            unvouch,
+            SocietyEvent::Unvouch {
+                block_number: 2,
+                ..
+            }
+        ));
+
+        let auto = parse_society_event(
+            3,
+            block_hash,
+            2,
+            "AutoUnbid",
+            &serde_json::json!({"candidate": candidate}),
+        )
+        .unwrap();
+        assert!(matches!(
+            auto,
+            SocietyEvent::AutoUnbid {
+                block_number: 3,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn parses_inducted_event_with_primary_and_batch() {
+        let block_hash = [2u8; 32];
+        let primary = account_json(30);
+        let second = account_json(40);
+        let third = account_json(50);
+
+        let inducted = parse_society_event(
+            7,
+            block_hash,
+            0,
+            "Inducted",
+            &serde_json::json!({
+                "primary": primary,
+                "candidates": [primary, second, third],
+            }),
+        )
+        .unwrap();
+        assert!(matches!(
+            inducted,
+            SocietyEvent::Inducted {
+                block_number: 7,
+                ..
+            }
+        ));
+        if let SocietyEvent::Inducted {
+            primary: p,
+            candidates,
+            ..
+        } = &inducted
+        {
+            assert_eq!(p, &encoded(30));
+            assert_eq!(candidates, &vec![encoded(30), encoded(40), encoded(50)]);
+        } else {
+            panic!("expected Inducted");
+        }
+    }
+
+    #[test]
+    fn parses_challenge_suspension_and_elevation_events() {
+        let block_hash = [3u8; 32];
+        let member = account_json(60);
+
+        let challenged = parse_society_event(
+            8,
+            block_hash,
+            0,
+            "Challenged",
+            &serde_json::json!({"member": member}),
+        )
+        .unwrap();
+        assert!(matches!(
+            challenged,
+            SocietyEvent::Challenged {
+                block_number: 8,
+                ..
+            }
+        ));
+
+        let suspended = parse_society_event(
+            9,
+            block_hash,
+            1,
+            "MemberSuspended",
+            &serde_json::json!({"member": member}),
+        )
+        .unwrap();
+        assert!(matches!(
+            suspended,
+            SocietyEvent::MemberSuspended {
+                block_number: 9,
+                ..
+            }
+        ));
+
+        let candidate_suspended = parse_society_event(
+            10,
+            block_hash,
+            2,
+            "CandidateSuspended",
+            &serde_json::json!({"candidate": account_json(61)}),
+        )
+        .unwrap();
+        assert!(matches!(
+            candidate_suspended,
+            SocietyEvent::CandidateSuspended {
+                block_number: 10,
+                ..
+            }
+        ));
+
+        let elevated = parse_society_event(
+            11,
+            block_hash,
+            3,
+            "Elevated",
+            &serde_json::json!({"member": member, "rank": 2}),
+        )
+        .unwrap();
+        assert!(matches!(
+            elevated,
+            SocietyEvent::Elevated {
+                block_number: 11,
+                rank: 2,
+                ..
+            }
+        ));
+
+        let judgement = parse_society_event(
+            12,
+            block_hash,
+            4,
+            "SuspendedMemberJudgement",
+            &serde_json::json!({"who": member, "judged": false}),
+        )
+        .unwrap();
+        assert!(matches!(
+            judgement,
+            SocietyEvent::SuspendedMemberJudgement {
+                block_number: 12,
+                judged: false,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn parses_vote_and_defender_vote_events() {
+        let block_hash = [4u8; 32];
+        let candidate = account_json(70);
+        let voter = account_json(80);
+
+        let vote = parse_society_event(
+            13,
+            block_hash,
+            0,
+            "Vote",
+            &serde_json::json!({
+                "candidate": candidate,
+                "voter": voter,
+                "vote": true,
+            }),
+        )
+        .unwrap();
+        assert!(matches!(
+            vote,
+            SocietyEvent::Vote {
+                block_number: 13,
+                approve: true,
+                ..
+            }
+        ));
+        if let SocietyEvent::Vote {
+            candidate: c,
+            voter: v,
+            ..
+        } = &vote
+        {
+            assert_eq!(c, &encoded(70));
+            assert_eq!(v, &encoded(80));
+        }
+
+        let defender_vote = parse_society_event(
+            14,
+            block_hash,
+            1,
+            "DefenderVote",
+            &serde_json::json!({"voter": voter, "vote": false}),
+        )
+        .unwrap();
+        assert!(matches!(
+            defender_vote,
+            SocietyEvent::DefenderVote {
+                block_number: 14,
+                approve: false,
+                ..
+            }
+        ));
     }
 
     #[test]

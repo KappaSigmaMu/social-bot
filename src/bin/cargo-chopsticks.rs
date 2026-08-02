@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use element_bot::custom_runtime::{apply_wasm_override, ensure_custom_runtime_wasm};
+use social_bot::custom_runtime::{apply_wasm_override, ensure_custom_runtime_wasm};
 use std::env;
 use std::fs;
 use std::path::PathBuf;
@@ -83,7 +83,8 @@ fn config_path(resume: bool, custom: bool) -> Result<PathBuf> {
         return Ok(PathBuf::from(BASE_CONFIG));
     }
 
-    let mut config = fs::read_to_string(BASE_CONFIG).with_context(|| format!("reading {BASE_CONFIG}"))?;
+    let mut config =
+        fs::read_to_string(BASE_CONFIG).with_context(|| format!("reading {BASE_CONFIG}"))?;
     if custom {
         config = apply_wasm_override(&config);
     }
@@ -91,7 +92,7 @@ fn config_path(resume: bool, custom: bool) -> Result<PathBuf> {
         config.push_str("\nresume: true\n");
     }
 
-    let path = env::temp_dir().join(format!("element-bot-chopsticks-{}.yml", std::process::id()));
+    let path = env::temp_dir().join(format!("social-bot-chopsticks-{}.yml", std::process::id()));
     fs::write(&path, config).with_context(|| format!("writing {}", path.display()))?;
     Ok(path)
 }

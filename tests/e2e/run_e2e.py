@@ -5,6 +5,8 @@ import time
 import urllib.request
 
 BASE_URL = os.environ.get("MATRIX_TEST_URL", "http://127.0.0.1:8008")
+BOT_HEALTH_URL = os.environ.get("BOT_HEALTH_URL", "http://bot:8080/health")
+X_MOCK_URL = os.environ.get("X_MOCK_URL", "http://x-mock:8081")
 TEST_USER = "@tester:e2e.local"
 KNOWN_KUSAMA_ADDRESS = "FUfBKr2pDxKrxmExGp4hjU6St4BDgffzKcyAqv6pruGnez1"
 
@@ -77,10 +79,39 @@ def contains_all(*fragments):
     return lambda body: all(fragment in body for fragment in fragments)
 
 
+def wait_for_health():
+    deadline = time.time() + 90
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(BOT_HEALTH_URL, timeout=5) as response:
+                if response.status == 200:
+                    body = json.loads(response.read().decode("utf-8"))
+                    if body.get("status") == "ok":
+                        print(f"[ok] healthcheck: {BOT_HEALTH_URL}", flush=True)
+                        return
+        except Exception:
+            pass
+        time.sleep(2)
+    raise AssertionError(f"bot healthcheck never returned 200 at {BOT_HEALTH_URL}")
+
+
+def x_posts():
+    with urllib.request.urlopen(X_MOCK_URL + "/_x/posts", timeout=5) as response:
+        return json.loads(response.read().decode("utf-8"))["posts"]
+
+
+def assert_no_x_posts():
+    posts = x_posts()
+    if posts:
+        raise AssertionError(f"expected no X posts, got {posts!r}")
+    print("[ok] X webhook: no posts", flush=True)
+
+
 def main():
     request("GET", "/_test/health")
     request("POST", "/_test/reset")
     wait_for_bot_initial_sync()
+    wait_for_health()
     assert_no_response("non-command Matrix message", "hello bot")
 
     cases = [
@@ -149,6 +180,7 @@ def main():
     for label, command, predicate in cases:
         assert_command(label, command, predicate)
 
+    assert_no_x_posts()
     print("e2e passed")
 
 

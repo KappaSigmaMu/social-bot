@@ -138,7 +138,10 @@ mod tests {
     fn test_society(chain: FakeChain) -> Society<FakeChain> {
         let file = NamedTempFile::new().unwrap();
         let path = file.into_temp_path().keep().unwrap();
-        Society::new(chain, OverrideStore::open(path).unwrap())
+        Society::new(
+            chain,
+            std::sync::Arc::new(std::sync::Mutex::new(OverrideStore::open(path).unwrap())),
+        )
     }
 
     #[tokio::test]

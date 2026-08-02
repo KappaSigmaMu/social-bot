@@ -11,6 +11,8 @@ pub struct Config {
     pub db_path: String,
     pub prefix: String,
     pub sample_mode: bool,
+    pub x_webhook_url: Option<String>,
+    pub healthcheck_addr: String,
 }
 
 impl Config {
@@ -53,7 +55,7 @@ impl Config {
             matrix_homeserver: env::var("MATRIX_HOMESERVER")
                 .unwrap_or_else(|_| "https://matrix.org".to_owned()),
             matrix_user_id: env::var("MATRIX_USER_ID")
-                .unwrap_or_else(|_| "@societybot:matrix.org".to_owned()),
+                .unwrap_or_else(|_| "@kappasigmabot:matrix.org".to_owned()),
             rpc_url: rpc_url_override.unwrap_or_else(|| {
                 if dev_mode {
                     Self::DEV_RPC_URL.to_owned()
@@ -65,12 +67,19 @@ impl Config {
             db_path: env::var("DB_PATH").unwrap_or_else(|_| "./society_overrides.db".to_owned()),
             prefix: env::var("PREFIX").unwrap_or_else(|_| "!".to_owned()),
             sample_mode,
+            x_webhook_url: optional("X_WEBHOOK_URL"),
+            healthcheck_addr: env::var("HEALTHCHECK_ADDR")
+                .unwrap_or_else(|_| "127.0.0.1:8080".to_owned()),
         })
     }
 }
 
 fn required(name: &str) -> Result<String> {
     env::var(name).with_context(|| format!("{name} must be set"))
+}
+
+fn optional(name: &str) -> Option<String> {
+    env::var(name).ok().filter(|value| !value.trim().is_empty())
 }
 
 #[cfg(test)]
@@ -106,11 +115,13 @@ mod tests {
         assert_eq!(config.matrix_room, "!room:e2e.local");
         assert_eq!(config.matrix_token, "token");
         assert_eq!(config.matrix_homeserver, "https://matrix.org");
-        assert_eq!(config.matrix_user_id, "@societybot:matrix.org");
+        assert_eq!(config.matrix_user_id, "@kappasigmabot:matrix.org");
         assert_eq!(config.rpc_url, "wss://kusama-rpc.polkadot.io/");
         assert_eq!(config.db_path, "./society_overrides.db");
         assert_eq!(config.prefix, "!");
         assert!(!config.sample_mode);
+        assert_eq!(config.x_webhook_url, None);
+        assert_eq!(config.healthcheck_addr, "127.0.0.1:8080");
 
         clear_env();
     }
@@ -126,6 +137,8 @@ mod tests {
         set_env("RPC_URL", "ws://chopsticks:8000");
         set_env("DB_PATH", "/tmp/society.db");
         set_env("PREFIX", "?");
+        set_env("X_WEBHOOK_URL", "https://hook.example/x");
+        set_env("HEALTHCHECK_ADDR", "0.0.0.0:9000");
 
         let config = Config::from_process_env().unwrap();
         assert_eq!(config.matrix_homeserver, "http://matrix:8008");
@@ -134,6 +147,25 @@ mod tests {
         assert_eq!(config.db_path, "/tmp/society.db");
         assert_eq!(config.prefix, "?");
         assert!(!config.sample_mode);
+        assert_eq!(
+            config.x_webhook_url.as_deref(),
+            Some("https://hook.example/x")
+        );
+        assert_eq!(config.healthcheck_addr, "0.0.0.0:9000");
+
+        clear_env();
+    }
+
+    #[test]
+    fn blank_x_webhook_url_disables_x() {
+        let _guard = env_lock().lock().unwrap();
+        clear_env();
+        set_env("MATRIX_ROOM", "!room:e2e.local");
+        set_env("MATRIX_TOKEN", "token");
+        set_env("X_WEBHOOK_URL", "  ");
+
+        let config = Config::from_process_env().unwrap();
+        assert_eq!(config.x_webhook_url, None);
 
         clear_env();
     }
@@ -231,6 +263,8 @@ mod tests {
             "RPC_URL",
             "DB_PATH",
             "PREFIX",
+            "X_WEBHOOK_URL",
+            "HEALTHCHECK_ADDR",
         ] {
             remove_env(name);
         }
