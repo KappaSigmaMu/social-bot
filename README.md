@@ -42,10 +42,11 @@ the round thread (identities use the on-chain `display` name when available):
 
 ### X (Twitter) output
 
-When `X_WEBHOOK_URL` is set, a fixed subset of announcements is also posted to X
-through a Make.com webhook: round start, claim start, `Bid`, `Unbid`, `Vouch`,
-`Inducted`, `Challenged`. Votes are Element-thread-only and never posted to X.
-An X post failure is logged and never blocks or delays the Matrix message.
+When `X_BUFFER_API_KEY` and `X_BUFFER_CHANNEL_ID` are set, a fixed subset of
+announcements is also posted to X through the Buffer API (`mode: shareNow`):
+round start, claim start, `Bid`, `Unbid`, `Vouch`, `Inducted`, `Challenged`.
+Votes are Element-thread-only and never posted to X. An X post failure is
+logged and never blocks or delays the Matrix message.
 
 ### Healthcheck
 
@@ -85,15 +86,21 @@ Optional:
 - `DB_PATH`: defaults to `./society_overrides.db`.
 - `PREFIX`: defaults to `!`.
 - `RUST_LOG`: tracing filter, for example `info` or `social_bot=debug`.
-- `X_WEBHOOK_URL`: Make.com webhook URL. Leave unset (or blank) to disable X output entirely. Treat it as a secret — anyone with it can post.
+- `X_BUFFER_API_KEY`: Buffer API key (Bearer token, from Buffer's API settings). Leave unset (or blank) to disable X output entirely.
+- `X_BUFFER_CHANNEL_ID`: Buffer channel ID for the bot's X account. Posts are published immediately (`mode: shareNow`).
+- `X_BUFFER_URL`: Buffer API endpoint, defaults to `https://api.buffer.com`.
 - `HEALTHCHECK_ADDR`: healthcheck bind address, defaults to `127.0.0.1:8080`.
 
-### Make.com X setup
+### Buffer X setup
 
-1. Pick/create the bot's X account.
-2. Create a free Make.com scenario with a **Webhooks → Custom webhook** (instant) trigger.
-3. Add an **X (Twitter) → Create a Post** module, OAuth-connect the X account, and map text to `{{1.text}}`. Activate.
-4. Put the webhook URL in `X_WEBHOOK_URL`. Make runs the integration under its own X API agreement, so no X developer account is needed.
+1. Pick/create the bot's X account and connect it to Buffer as a channel.
+2. In Buffer, open **Settings → API** and generate an API key.
+3. Use the Buffer API (or the API Explorer) to find the channel ID for the X
+   account: query `channels(input: { organizationId: "…" }) { id name service }`
+   and pick the id whose `service` is `twitter`.
+4. Put the API key in `X_BUFFER_API_KEY` and the channel id in
+   `X_BUFFER_CHANNEL_ID`. Buffer runs the integration under its own X API
+   agreement, so no X developer account is needed.
 
 ## Production deployment
 

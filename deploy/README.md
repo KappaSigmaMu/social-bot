@@ -80,7 +80,9 @@ RPC_URL=wss://kusama-rpc.polkadot.io/
 DB_PATH=/data/society_overrides.db
 PREFIX=!
 RUST_LOG=info
-# X_WEBHOOK_URL=           # Make.com webhook URL; leave unset to disable X
+# X_BUFFER_API_KEY=        # Buffer API key; leave unset to disable X
+# X_BUFFER_CHANNEL_ID=     # Buffer channel ID for the X account
+# X_BUFFER_URL=https://api.buffer.com
 # HEALTHCHECK_ADDR=127.0.0.1:8080
 ```
 
@@ -221,7 +223,7 @@ Confirm GitHub Actions completed on `main` and the package exists at `ghcr.io/ka
 **Healthcheck says unhealthy**
 
 - Confirm `HEALTHCHECK_ADDR` is reachable inside the container; the compose file publishes port 8080 and the healthcheck uses `curl` (installed in the runtime image).
-- If X posts are failing, check logs for `X webhook post failed` — this never affects Matrix output.
+- If X posts are failing, check logs for `X Buffer post failed` — this never affects Matrix output.
 
 ## What not to do
 

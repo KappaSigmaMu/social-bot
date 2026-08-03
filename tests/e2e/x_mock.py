@@ -1,9 +1,20 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import re
 import threading
 
 state = {"posts": []}
 state_lock = threading.Lock()
+
+TEXT_RE = re.compile(r'text:\s*"((?:[^"\\]|\\.)*)"')
+
+
+def extract_text(payload):
+    query = payload.get("query", "")
+    match = TEXT_RE.search(query)
+    if not match:
+        return None
+    return match.group(1).replace('\\"', '"').replace("\\\\", "\\")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -21,11 +32,16 @@ class Handler(BaseHTTPRequestHandler):
         self.json_response({"error": "not found", "path": self.path}, status=404)
 
     def do_POST(self):
-        if self.path == "/webhook":
+        if self.path == "/":
             payload = self.read_json()
+            text = extract_text(payload)
             with state_lock:
-                state["posts"].append(payload)
-            self.json_response({"ok": True})
+                state["posts"].append(
+                    {"text": text, "authorization": self.headers.get("authorization")}
+                )
+            self.json_response(
+                {"data": {"createPost": {"post": {"id": "mock-post-1"}}}}
+            )
             return
         self.json_response({"error": "not found", "path": self.path}, status=404)
 

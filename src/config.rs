@@ -11,11 +11,14 @@ pub struct Config {
     pub db_path: String,
     pub prefix: String,
     pub sample_mode: bool,
-    pub x_webhook_url: Option<String>,
+    pub x_buffer_api_key: Option<String>,
+    pub x_buffer_channel_id: Option<String>,
+    pub x_buffer_url: String,
     pub healthcheck_addr: String,
 }
 
 impl Config {
+    const BUFFER_API_URL: &'static str = "https://api.buffer.com";
     const DEV_RPC_URL: &'static str = "ws://127.0.0.1:8000";
 
     pub fn from_env() -> Result<Self> {
@@ -67,7 +70,10 @@ impl Config {
             db_path: env::var("DB_PATH").unwrap_or_else(|_| "./society_overrides.db".to_owned()),
             prefix: env::var("PREFIX").unwrap_or_else(|_| "!".to_owned()),
             sample_mode,
-            x_webhook_url: optional("X_WEBHOOK_URL"),
+            x_buffer_api_key: optional("X_BUFFER_API_KEY"),
+            x_buffer_channel_id: optional("X_BUFFER_CHANNEL_ID"),
+            x_buffer_url: env::var("X_BUFFER_URL")
+                .unwrap_or_else(|_| Self::BUFFER_API_URL.to_owned()),
             healthcheck_addr: env::var("HEALTHCHECK_ADDR")
                 .unwrap_or_else(|_| "127.0.0.1:8080".to_owned()),
         })
@@ -120,7 +126,9 @@ mod tests {
         assert_eq!(config.db_path, "./society_overrides.db");
         assert_eq!(config.prefix, "!");
         assert!(!config.sample_mode);
-        assert_eq!(config.x_webhook_url, None);
+        assert_eq!(config.x_buffer_api_key, None);
+        assert_eq!(config.x_buffer_channel_id, None);
+        assert_eq!(config.x_buffer_url, Config::BUFFER_API_URL);
         assert_eq!(config.healthcheck_addr, "127.0.0.1:8080");
 
         clear_env();
@@ -137,7 +145,9 @@ mod tests {
         set_env("RPC_URL", "ws://chopsticks:8000");
         set_env("DB_PATH", "/tmp/society.db");
         set_env("PREFIX", "?");
-        set_env("X_WEBHOOK_URL", "https://hook.example/x");
+        set_env("X_BUFFER_API_KEY", "secret-key");
+        set_env("X_BUFFER_CHANNEL_ID", "channel-123");
+        set_env("X_BUFFER_URL", "http://x-mock:8081");
         set_env("HEALTHCHECK_ADDR", "0.0.0.0:9000");
 
         let config = Config::from_process_env().unwrap();
@@ -147,25 +157,26 @@ mod tests {
         assert_eq!(config.db_path, "/tmp/society.db");
         assert_eq!(config.prefix, "?");
         assert!(!config.sample_mode);
-        assert_eq!(
-            config.x_webhook_url.as_deref(),
-            Some("https://hook.example/x")
-        );
+        assert_eq!(config.x_buffer_api_key.as_deref(), Some("secret-key"));
+        assert_eq!(config.x_buffer_channel_id.as_deref(), Some("channel-123"));
+        assert_eq!(config.x_buffer_url, "http://x-mock:8081");
         assert_eq!(config.healthcheck_addr, "0.0.0.0:9000");
 
         clear_env();
     }
 
     #[test]
-    fn blank_x_webhook_url_disables_x() {
+    fn blank_buffer_credentials_disable_x() {
         let _guard = env_lock().lock().unwrap();
         clear_env();
         set_env("MATRIX_ROOM", "!room:e2e.local");
         set_env("MATRIX_TOKEN", "token");
-        set_env("X_WEBHOOK_URL", "  ");
+        set_env("X_BUFFER_API_KEY", "  ");
+        set_env("X_BUFFER_CHANNEL_ID", "  ");
 
         let config = Config::from_process_env().unwrap();
-        assert_eq!(config.x_webhook_url, None);
+        assert_eq!(config.x_buffer_api_key, None);
+        assert_eq!(config.x_buffer_channel_id, None);
 
         clear_env();
     }
@@ -263,7 +274,9 @@ mod tests {
             "RPC_URL",
             "DB_PATH",
             "PREFIX",
-            "X_WEBHOOK_URL",
+            "X_BUFFER_API_KEY",
+            "X_BUFFER_CHANNEL_ID",
+            "X_BUFFER_URL",
             "HEALTHCHECK_ADDR",
         ] {
             remove_env(name);

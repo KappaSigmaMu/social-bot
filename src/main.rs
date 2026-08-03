@@ -6,7 +6,7 @@ use social_bot::health;
 use social_bot::logging;
 use social_bot::matrix::MatrixClient;
 use social_bot::store::OverrideStore;
-use social_bot::x::XWebhook;
+use social_bot::x::XBuffer;
 use std::sync::{Arc, Mutex};
 
 #[tokio::main]
@@ -37,7 +37,14 @@ async fn main() -> Result<()> {
     let store = Arc::new(Mutex::new(OverrideStore::open(&config.db_path)?));
     let chain = SubxtKusama::connect_with_retry(&config.rpc_url).await;
     let society = Arc::new(Society::new(chain.clone(), store.clone()));
-    let x = config.x_webhook_url.clone().map(|url| XWebhook::new(url));
+    let x = match (&config.x_buffer_api_key, &config.x_buffer_channel_id) {
+        (Some(api_key), Some(channel_id)) => Some(XBuffer::new(
+            config.x_buffer_url.clone(),
+            api_key.clone(),
+            channel_id.clone(),
+        )),
+        _ => None,
+    };
 
     let period_matrix = matrix.clone();
     let period_room = room_id.clone();

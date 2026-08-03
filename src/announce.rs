@@ -10,7 +10,7 @@ use crate::messages::{
 };
 use crate::models::{Bid, CandidatePeriodKind, SocietyEvent};
 use crate::store::OverrideStore;
-use crate::x::XWebhook;
+use crate::x::XBuffer;
 use anyhow::{Result, anyhow};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -25,7 +25,7 @@ pub async fn run_period_loop(
     store: Arc<Mutex<OverrideStore>>,
     society: Arc<Society<SubxtKusama>>,
     rpc_chain: SubxtKusama,
-    x: Option<XWebhook>,
+    x: Option<XBuffer>,
 ) -> ! {
     let mut last_period: Option<CandidatePeriodKind> = None;
     loop {
@@ -77,7 +77,7 @@ pub async fn run_event_loop(
     store: Arc<Mutex<OverrideStore>>,
     society: Arc<Society<SubxtKusama>>,
     chain: SubxtKusama,
-    x: Option<XWebhook>,
+    x: Option<XBuffer>,
 ) -> ! {
     let identities = Arc::new(Mutex::new(HashMap::<String, String>::new()));
     chain
@@ -133,7 +133,7 @@ async fn announce_round_start(
     matrix: &MatrixClient,
     room_id: &str,
     store: &Mutex<OverrideStore>,
-    x: Option<&XWebhook>,
+    x: Option<&XBuffer>,
     relay_block: u64,
     message: &str,
     society: &Society<SubxtKusama>,
@@ -183,7 +183,7 @@ async fn announce_claim_start(
     matrix: &MatrixClient,
     room_id: &str,
     store: &Mutex<OverrideStore>,
-    x: Option<&XWebhook>,
+    x: Option<&XBuffer>,
     relay_block: u64,
     society: &Society<SubxtKusama>,
 ) {
@@ -222,7 +222,7 @@ async fn handle_event(
     room_id: &str,
     store: &Mutex<OverrideStore>,
     society: &Society<SubxtKusama>,
-    x: Option<&XWebhook>,
+    x: Option<&XBuffer>,
     identities: &Mutex<HashMap<String, String>>,
     event: SocietyEvent,
 ) -> Result<()> {
@@ -488,7 +488,7 @@ async fn handle_event(
 async fn dispatch(
     matrix: &MatrixClient,
     room_id: &str,
-    x: Option<&XWebhook>,
+    x: Option<&XBuffer>,
     root_event_id: Option<&str>,
     text: String,
     x_text: Option<&str>,
@@ -509,13 +509,13 @@ async fn dispatch(
     dispatch_x(x, x_text);
 }
 
-fn dispatch_x(x: Option<&XWebhook>, text: Option<&str>) {
+fn dispatch_x(x: Option<&XBuffer>, text: Option<&str>) {
     if let (Some(x), Some(text)) = (x, text) {
         let x = x.clone();
         let text = text.to_owned();
         tokio::spawn(async move {
             if let Err(err) = x.post(&text).await {
-                error!(?err, "X webhook post failed");
+                error!(?err, "X Buffer post failed");
             }
         });
     }

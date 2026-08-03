@@ -104,7 +104,7 @@ def assert_no_x_posts():
     posts = x_posts()
     if posts:
         raise AssertionError(f"expected no X posts, got {posts!r}")
-    print("[ok] X webhook: no posts", flush=True)
+    print("[ok] X Buffer: no posts", flush=True)
 
 
 def main():

@@ -71,7 +71,9 @@ services:
       DB_PATH: /tmp/society_overrides.db
       PREFIX: "!"
       RUST_LOG: warn
-      X_WEBHOOK_URL: http://x-mock:8081/webhook
+      X_BUFFER_API_KEY: e2e-buffer-key
+      X_BUFFER_CHANNEL_ID: e2e-channel
+      X_BUFFER_URL: http://x-mock:8081
       HEALTHCHECK_ADDR: 0.0.0.0:8080
     ports:
       - "8080:8080"

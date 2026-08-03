@@ -4,8 +4,8 @@ This harness runs the bot against:
 
 - a Chopsticks fork at `ws://chopsticks:8000`, using the copied Asset Hub config [kusama.yml](kusama.yml)
 - a tiny mock Matrix homeserver
-- a tiny mock X (Twitter) webhook receiver
-- a Python assertion runner that exercises `!ping`, `!head`, `!period`, `!defender`, `!skeptics`, `!candidates`, `!set_address`, `!me`, and `!unset_address`, plus the `GET /health` HTTP endpoint and the X webhook wiring
+- a tiny mock X (Twitter) Buffer API receiver
+- a Python assertion runner that exercises `!ping`, `!head`, `!period`, `!defender`, `!skeptics`, `!candidates`, `!set_address`, `!me`, and `!unset_address`, plus the `GET /health` HTTP endpoint and the X Buffer wiring
 
 Run it from the repository root:
 
@@ -35,7 +35,7 @@ transitions happen during the test window. The runner therefore asserts:
 
 - every Matrix command works as before,
 - `GET /health` returns `200 {"status":"ok",...}`,
-- the X mock webhook records zero posts (the wiring works, but nothing is posted).
+- the X mock Buffer API records zero posts (the wiring works, but nothing is posted).
 
 The announcement/threading flow — round start as the single main-channel message, every
 later event in its thread, and the X posts for the approved subset — is exercised

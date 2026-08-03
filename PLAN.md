@@ -12,7 +12,7 @@ outputs — Element (Matrix), restructured around weekly round threads, and X
 | 1 | SQLite persistence (seen events, round state) |
 | 2 | Element threading: 1 main message per round, everything else in-thread |
 | 3 | Expanded Society event monitoring (all meaningful events) |
-| 4 | X output via Make.com webhook (strictly free) |
+| 4 | X output via Buffer (strictly free) |
 | 5 | Healthcheck HTTP endpoint |
 
 Each phase is independently testable and committable. Implement in order.
@@ -195,37 +195,36 @@ README; removal/fix is a separate change.
 
 ---
 
-## Phase 4 — X output via Make.com webhook
+## Phase 4 — X output via Buffer
 
-**Confirmed:** Make's free plan (1,000 credits/mo, no time limit, 2 active
-scenarios, instant webhooks exempt from the 15-min scheduling minimum) includes
-the X/Twitter "Create a Post" module as a standard app — Make's pricing FAQ
-explicitly lists "posts a tweet" as a credit operation. Make runs the
-integration under its own X API agreement: **zero X API cost, zero X developer
-account, ToS-compliant**. Fallback if this ever changes: Pabbly Connect free
-tier (same webhook pattern); last resort: official pay-per-use API (~$0.25/mo
-at our volume) — do not implement fallbacks now.
+**Confirmed:** Buffer's free plan includes posting to connected social channels.
+Buffer runs the integration under its own X API agreement: **zero X API cost,
+zero X developer account, ToS-compliant**. Fallback if this ever changes:
+Pabbly Connect free tier (webhook pattern); last resort: official pay-per-use
+API (~$0.25/mo at our volume) — do not implement fallbacks now.
 
 ### Manual setup (do first; ~15 min)
 
-1. Pick/create the bot's X account.
-2. Make.com free account → scenario → trigger **Webhooks → Custom webhook**
-   (instant) → copy URL.
-3. Add module **X (Twitter) → Create a Post** → OAuth-connect the X account →
-   map text to `{{1.text}}`. Activate.
-4. `X_WEBHOOK_URL=<url>` in `.env`. Treat as a secret (anyone with it can post).
+1. Pick/create the bot's X account and connect it to Buffer as a channel.
+2. Buffer → **Settings → API** → generate an API key.
+3. Use the Buffer API (or API Explorer) to find the channel ID for the X
+   account: query `channels(input: { organizationId: "…" }) { id name service }`
+   and pick the `twitter` service id.
+4. `X_BUFFER_API_KEY=<key>` and `X_BUFFER_CHANNEL_ID=<id>` in `.env`.
 
 ### Code
 
-- `src/config.rs`: optional `x_webhook_url: Option<String>` (missing/empty →
-  `None`; X disabled, behavior identical to today). Tests.
-- `src/x.rs`: `XWebhook { http: reqwest::Client, url: String }` with
-  `payload(text) -> serde_json::Value` (`{"text": …}`, pure, tested) and
-  `post(&self, text) -> Result<()>` (Err on non-2xx with status+body). Same
+- `src/config.rs`: optional `x_buffer_api_key` / `x_buffer_channel_id`
+  (`Option<String>`, missing/empty → `None`; X disabled, behavior identical to
+  today) plus `x_buffer_url` (defaults to `https://api.buffer.com`). Tests.
+- `src/x.rs`: `XBuffer { http: reqwest::Client, url, api_key, channel_id }` with
+  `payload(channel_id, text) -> serde_json::Value` (GraphQL `createPost`
+  mutation, `mode: shareNow`, pure, tested) and `post(&self, text) ->
+  Result<()>` (Err on non-2xx or GraphQL `MutationError`, with message). Same
   reqwest style as `matrix.rs`. No new crates.
-- `src/announce.rs`: add `x: Option<XWebhook>` and a `dispatch(matrix_text,
-  thread, x_text: Option<&str>)` helper — sends the Matrix part (thread or main
-  per Phase 2) and, if configured and `x_text` is `Some`, posts to the webhook.
+- `src/announce.rs`: `x: Option<XBuffer>` and a `dispatch(matrix_text, thread,
+  x_text: Option<&str>)` helper — sends the Matrix part (thread or main per
+  Phase 2) and, if configured and `x_text` is `Some`, posts to Buffer.
   **Per-output error isolation**: an X failure logs `error!` and never blocks or
   delays Matrix, and vice versa.
 - `src/messages.rs` — X composers for the X subset only. Plain text, no
@@ -273,8 +272,9 @@ at our volume) — do not implement fallbacks now.
 - **E2E** (`tests/e2e/`, docker): extend to assert —
   1. round start → exactly one main-channel message; subsequent events → thread
      messages referencing its `event_id` (`m.thread` relation);
-  2. a tiny mock webhook receiver (extend `matrix_mock.py` or add `x_mock.py`)
-     records X posts for the X subset only (assert NO post for votes);
+   2. a tiny mock Buffer API receiver (extend `matrix_mock.py` or add
+      `x_mock.py`) records X posts for the X subset only (assert NO post for
+      votes);
   3. `curl localhost:8080/health` from the e2e runner → 200.
   Update `tests/e2e/README.md`.
 - **Gates per phase:** `cargo fmt --check`, `cargo check`, `cargo test`.
@@ -282,8 +282,9 @@ at our volume) — do not implement fallbacks now.
 ## Docs
 
 - `README.md`: rename; new features (threading model, expanded events, X
-  output, healthcheck); config table += `X_WEBHOOK_URL`, `HEALTHCHECK_ADDR`;
-  Make.com setup summary; note votes go to thread only; `NextIntakeAt` caveat.
+  output, healthcheck); config table += `X_BUFFER_API_KEY`, `X_BUFFER_CHANNEL_ID`,
+  `HEALTHCHECK_ADDR`; Buffer setup summary; note votes go to thread only;
+  `NextIntakeAt` caveat.
 - `deploy/README.md`: migration note, new env vars, healthcheck, GHCR rename.
 - `.env.example` / `deploy/.env.example`: new vars (commented).
 
@@ -293,8 +294,9 @@ at our volume) — do not implement fallbacks now.
 2. Element: one main-channel message per round; all other announcements in its
    thread, including claim start and every individual vote with identity
    display names; commands unchanged.
-3. X: the approved subset posts via Make webhook within seconds; X off by
-   default (no `X_WEBHOOK_URL`) with zero behavior change.
+3. X: the approved subset posts via the Buffer API (`shareNow`) immediately; X
+   off by default (no `X_BUFFER_API_KEY` / `X_BUFFER_CHANNEL_ID`) with zero
+   behavior change.
 4. Restarts do not duplicate event announcements and do not lose the round thread.
 5. `curl $HOST:8080/health` → `200 {"status":"ok",…}`.
 6. `cargo fmt --check`, `cargo check`, `cargo test` green.
